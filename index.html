@@ -159,6 +159,11 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   .li{font-size:13.5px;}
   .li small{font-size:12px;}
   .statlines{font-size:13.5px;}
+  /* location rows: name line on top, controls (🌱 dropdown + buttons) wrap
+     to their own line instead of crushing/overflowing */
+  #loc-list .li{flex-wrap:wrap;}
+  #loc-list .li .grow{flex:1 1 100%;}
+  #loc-list .li select{max-width:calc(100% - 120px);}
   /* header: title row, then the tabs as a clean 3-across bar */
   .hdr h1{flex:1;}
   .hdr .sp{display:none;}
@@ -343,15 +348,15 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
       <b>override Open-Meteo for the hours they cover</b> — and a real <b>leaf-wetness sensor is used by the model directly</b>,
       which beats estimating wetness from humidity. Open-Meteo still fills any gaps plus the 7-day forecast.
       <b>Everything here is PER LOCATION</b> — each of your locations can have its own station, its own connection, its own
-      imports (they never share). The connect buttons below act on the location that's <b>active</b> in the top bar; the lists
-      show every location's setup, with one-tap switches.</div>
+      imports (they never share). Here's what each location uses right now; the connect options below act on the
+      <b>active</b> location.</div>
+      <div class="list" id="src-status"></div>
 
       <label class="fl" style="margin-top:12px;">Option A — 🛰 link a NEWA / partner-network station (automatic)</label>
       <div class="note">If there's a station near you on <a href="https://newa.cornell.edu" target="_blank" rel="noopener">NEWA</a>
       (Cornell's ag-weather network — includes partner networks like Rutgers NJWxNet and many nursery/orchard stations, most with
       leaf-wetness sensors), BlightCast can pull its hourly data automatically — no file handling, refreshed every time you open
       the page. Reading station data is free and needs no account.</div>
-      <div class="list" id="newa-status"></div>
       <div class="row" style="margin-top:8px;">
         <button class="btn" onclick="newaFind()" id="newa-find-btn">🔍 Find stations near the active location</button>
       </div>
@@ -364,7 +369,6 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
       link</b>: an address that returns readings as CSV or JSON (most station services and mesonets have one — the key
       goes in the address), mapped once on a preview screen and refreshed automatically after that. Tokens and links stay
       in this browser and are <b>never</b> included in 🔗 setup share-links.</div>
-      <div class="list" id="api-status"></div>
       <div class="row" style="margin-top:8px;">
         <button class="btn" onclick="apiLicorOpen()">🔌 Connect LI-COR Cloud</button>
         <button class="btn" onclick="apiFeedConnect()">🔗 Connect a data feed (CSV/JSON URL)</button>
@@ -378,7 +382,6 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
       time at the station; columns can be in any order and named almost anything — you confirm the mapping on a preview screen
       before anything is saved. Re-import a fresh download any time: new hours merge in. The file is read right here in your
       browser — nothing is uploaded anywhere.</div>
-      <div class="list" id="stn-status"></div>
       <div class="row" style="margin-top:10px;">
         <label class="btn pri" style="margin:0;font-size:12.5px;">📂 Import a weather CSV<input type="file" accept=".csv,.txt,.tsv" style="display:none;" onchange="stnFile(this)"></label>
         <button class="btn" onclick="stnExample()" title="Downloads a small CSV in a layout BlightCast reads perfectly — match your export to it, or just eyeball the shape">⬇ Example CSV</button>
@@ -471,7 +474,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.13 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.14 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -2158,27 +2161,41 @@ function newaUnlink(locId){
   if(state.activeLoc===locId)_newaCache=null;
   newaRender();renderAll();
 }
-function newaRender(){
-  var box=document.getElementById('newa-status');if(!box)return;
-  var items=[];
-  locs.forEach(function(l){
+/* ── ONE card per location: which station / connection / imports THAT
+   location uses (source-type grouping confused a 2-location setup) ── */
+function srcRender(){
+  var box=document.getElementById('src-status');if(!box)return;
+  if(!locs.length){box.innerHTML='<div class="li" style="border:none;color:var(--txt2);">Add a 📍 location first.</div>';return;}
+  box.innerHTML=locs.map(function(l){
+    var active=l.id===state.activeLoc;
+    var rows='';
+    var mk=function(html){return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12.5px;">'+html+'</div>';};
+    var switchBtn='<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\')">→ make active to set up</button>';
     if(l.newa){
       var c=bcLoadK(newaKey(l.id),null);
       var thru=c&&c.hours&&c.hours.length?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
-      var lw=c?(c.lwet?'leaf wetness ✓ (sensor)':'no leaf-wetness sensor — wetness estimated'):'';
-      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🛰 '+esc(l.newa.name)
-        +'<small>'+esc(newaNetName(l.newa.net))+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
-        +'<button class="sbtn warn" onclick="newaUnlink(\''+l.id+'\')">✕ unlink</button></div>');
-    } else {
-      /* every location shows here — a different station per location is the
-         POINT; one tap makes that location active and starts the search */
-      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b><small>no station linked'+(l.id===state.activeLoc?' — it\'s active: 🔍 search below':'')+'</small></div>'
-        +(l.id===state.activeLoc?'':'<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\');newaFind()">🔍 Find its stations</button>'));
-      items[items.length-1]+='</div>';
-    }
-  });
-  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">Add a 📍 location first.</div>';
+      rows+=mk('🛰 <b>'+esc(l.newa.name)+'</b> <span class="note">'+esc(newaNetName(l.newa.net))+' · through '+esc(thru)+(c&&c.lwet?' · leaf wetness ✓':'')+'</span>'
+        +'<button class="sbtn warn" onclick="newaUnlink(\''+l.id+'\')">✕</button>');
+    } else rows+=mk('<span class="note">🛰 no NEWA station'+(active?' — Option A below':'')+'</span>'
+        +(active?'':'<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\');newaFind()">🔍 link one</button>'));
+    if(l.api){
+      var ca=bcLoadK(apiKey(l.id),null);
+      var thruA=(ca&&ca.hours&&ca.hours.length)?ca.hours[ca.hours.length-1][0].replace('T',' '):'fetching…';
+      var what=l.api.kind==='licor'?('LI-COR logger '+l.api.device):'data feed';
+      rows+=mk('🔌 <b>'+esc(l.api.name||what)+'</b> <span class="note">'+esc(what)+' · through '+esc(thruA)+(ca&&ca.lwet?' · leaf wetness ✓':'')+'</span>'
+        +'<button class="sbtn warn" onclick="apiUnlink(\''+l.id+'\')">✕</button>');
+    } else rows+=mk('<span class="note">🔌 no station connection'+(active?' — Option B below':'')+'</span>');
+    var b=stnLoad(l.id);
+    if(b&&b.hours&&b.hours.length){
+      var n=b.hours.length;
+      rows+=mk('📡 <b>'+n+' imported hours</b> <span class="note">'+b.hours[0][0].slice(0,10)+' → '+b.hours[n-1][0].slice(0,10)+(b.fname?' · '+esc(b.fname):'')+'</span>'
+        +'<button class="sbtn warn" onclick="stnClear(\''+l.id+'\')">✕</button>');
+    } else rows+=mk('<span class="note">📡 no imported file'+(active?' — Option C below':'')+'</span>');
+    return '<div class="li" style="flex-direction:column;align-items:stretch;gap:5px;"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><b>📍 '+esc(l.name)+'</b>'
+      +(active?'<span style="color:var(--acc);font-weight:700;font-size:12px;">active — the options below set THIS location up</span>':switchBtn)+'</div>'+rows+'</div>';
+  }).join('');
 }
+function newaRender(){srcRender();}
 /* fetch a linked station's last 31 days; 60-min cache; offsetSec = the
    location's UTC offset (from its Open-Meteo reply) so the end date is
    never in the station's future */
@@ -2327,26 +2344,7 @@ function apiFetchLoc(l,offsetSec,cb){
       }).catch(fail);
   } else cb([]);
 }
-function apiRender(){
-  var box=document.getElementById('api-status');if(!box)return;
-  var items=[];
-  locs.forEach(function(l){
-    if(l.api){
-      var c=bcLoadK(apiKey(l.id),null);
-      var thru=(c&&c.hours&&c.hours.length)?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
-      var what=l.api.kind==='licor'?('LI-COR · logger '+l.api.device):('feed · '+String(l.api.url||'').replace(/^https?:\/\//,'').slice(0,40)+'…');
-      var lw=c?(c.lwet?'leaf wetness ✓':'no leaf-wetness data — estimated'):'';
-      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🔌 '+esc(l.api.name||what)
-        +'<small>'+esc(what)+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
-        +'<button class="sbtn warn" onclick="apiUnlink(\''+l.id+'\')">✕ disconnect</button></div>');
-    } else {
-      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b><small>nothing connected'+(l.id===state.activeLoc?' — it\'s active: use the buttons below':'')+'</small></div>'
-        +(l.id===state.activeLoc?'':'<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\');toast(\'📍 \'+activeLoc().name+\' is active — now connect below\')">→ set up this location</button>')
-        +'</div>');
-    }
-  });
-  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">Add a 📍 location first.</div>';
-}
+function apiRender(){srcRender();}
 function apiUnlink(locId){
   var l=locs.find(function(x){return x.id===locId;});if(!l||!l.api)return;
   if(!confirm('Disconnect "'+(l.api.name||l.api.kind)+'" from '+l.name+'? (The saved token/link is removed from this browser.)'))return;
@@ -2563,19 +2561,7 @@ function stnClear(locId){
   try{localStorage.removeItem('blightcast_stn_'+locId);}catch(e){}
   stnRender();renderAll();
 }
-function stnRender(){
-  var box=document.getElementById('stn-status');if(!box)return;
-  var items=[];
-  locs.forEach(function(l){
-    var b=stnLoad(l.id);if(!b||!b.hours||!b.hours.length)return;
-    var n=b.hours.length,first=b.hours[0][0].slice(0,10),last=b.hours[n-1][0].slice(0,10);
-    var lwTxt={flag:'wet/dry sensor',scale:'0–10 sensor',minutes:'minutes-wet sensor',none:'none (estimated)'}[b.lwMode]||'—';
-    items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b><small>'+n+' hours · '+first+' → '+last
-      +' · leaf wetness: '+lwTxt+(b.fname?' · '+esc(b.fname):'')+'</small></div>'
-      +'<button class="sbtn warn" onclick="stnClear(\''+l.id+'\')">✕ remove</button></div>');
-  });
-  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">None imported — Open-Meteo covers everything.</div>';
-}
+function stnRender(){srcRender();}
 
 /* ════════════════════════════════════════════════════════════════════════
    👻 Last-year overlay — Open-Meteo ARCHIVE for the same window last year
