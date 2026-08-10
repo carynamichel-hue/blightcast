@@ -1,0 +1,2683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#2e6b2f">
+<title>BlightCast — boxwood blight risk</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232e6b2f'/><path d='M16 5c4 3 7 4 7 9 0 6-4 9-7 13-3-4-7-7-7-13 0-5 3-6 7-9z' fill='%23d9f2d0'/><path d='M16 8v16M16 12l-3.5-2M16 12l3.5-2M16 17l-4-2.4M16 17l4-2.4' stroke='%232e6b2f' stroke-width='1.6' stroke-linecap='round'/><circle cx='22' cy='9' r='4.6' fill='%23a12a2a'/></svg>">
+<style>
+/* ── BlightCast v0.6 · single-file boxwood blight risk planner ─────────────
+   Implements the USPest.org / Oregon State University boxwood blight
+   infection risk model v3.0 (Coop 2023) on Open-Meteo hourly weather —
+   or on REAL station data, which overrides Open-Meteo hour-for-hour and can
+   include real leaf-wetness readings (the model's native input): a linked
+   NEWA/Cornell network station, YOUR station's cloud API (LI-COR Cloud
+   built in; any CSV/JSON feed URL via the column mapper), or a hand-
+   imported CSV. Everything lives in THIS file + your browser's local
+   storage. Network calls: Open-Meteo (weather + town search + last-year
+   archive) and — only for sources you connect — NEWA at Cornell, LI-COR
+   Cloud, or your feed URL. No accounts, no uploads, no tracking. ───────── */
+:root{
+  --bg:#f3f7f2; --sur:#ffffff; --bdr:#d5e0d3; --txt:#182619; --txt2:#54655a;
+  --acc:#2e6b2f; --acc2:#3f8f42; --blue:#0e5a8a;
+  --bad:#a12a2a; --badbg:#fbecec;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;display:flex;flex-direction:column;}
+.hdr{background:linear-gradient(120deg,#173a1a,#2e6b2f,#3f8f42);color:#fff;padding:12px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.hdr h1{font-size:20px;font-weight:800;letter-spacing:.4px;display:flex;align-items:center;gap:8px;}
+.hdr .tag{font-size:11px;color:#c6e8bd;font-weight:400;}
+.hdr .sp{flex:1;}
+.ntabb{font:inherit;font-size:12.5px;font-weight:700;padding:6px 14px;border:1px solid rgba(255,255,255,.45);border-radius:8px;background:rgba(255,255,255,.12);color:#e2f4dc;cursor:pointer;transition:.15s;}
+.ntabb:hover{background:rgba(255,255,255,.26);}
+.ntabb.on{background:#fff;border-color:#fff;color:var(--acc);}
+.subbar{background:var(--sur);border-bottom:1.5px solid var(--bdr);padding:8px 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.main{flex:1;width:100%;max-width:1150px;margin:0 auto;padding:16px 18px 30px;display:flex;flex-direction:column;gap:14px;}
+.main .page{display:flex;flex-direction:column;gap:14px;}
+.pill{background:var(--sur);border:1.5px solid var(--bdr);border-radius:9px;padding:7px 13px;font-size:13px;display:flex;align-items:center;gap:7px;cursor:pointer;font-family:inherit;font-weight:600;color:var(--txt);}
+.pill:hover{border-color:var(--acc2);}
+select.pill{cursor:pointer;}
+.note{font-size:11.5px;color:var(--txt2);}
+.locchips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.locchip{background:var(--sur);border:1.5px solid var(--bdr);border-radius:16px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--txt);cursor:pointer;font-family:inherit;transition:.15s;}
+.locchip:hover{border-color:var(--acc2);}
+.locchip.on{background:var(--acc);border-color:var(--acc);color:#fff;}
+.panel{background:var(--sur);border:2px solid var(--bdr);border-radius:12px;padding:14px 16px;}
+.panel h2{font-size:15px;margin-bottom:4px;}
+.panel .sub{font-size:11.5px;color:var(--txt2);margin-bottom:10px;}
+.wwh{font-size:14px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+/* status card */
+.statgrid{display:flex;gap:22px;align-items:center;flex-wrap:wrap;}
+.bignum{font-size:44px;font-weight:800;line-height:1;}
+.bignum small{font-size:13px;font-weight:600;color:var(--txt2);display:block;margin-top:3px;}
+.bandchip{border-radius:16px;font-size:13px;font-weight:800;padding:6px 14px;border:1.5px solid transparent;display:inline-block;}
+.statlines{flex:1;min-width:240px;display:flex;flex-direction:column;gap:5px;font-size:13px;}
+.statlines .warn{color:var(--bad);font-weight:700;}
+.statlines .okk{color:var(--acc);font-weight:700;}
+/* day cards */
+.days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;}
+.day{background:var(--sur);border:2px solid var(--bdr);border-radius:11px;padding:9px 6px 8px;cursor:pointer;text-align:center;transition:border-color .15s,transform .15s;display:flex;flex-direction:column;gap:4px;font-family:inherit;color:var(--txt);}
+.day:hover{transform:translateY(-2px);}
+.day.sel{border-color:var(--acc);box-shadow:0 4px 14px rgba(46,107,47,.18);}
+.day.today{border-style:solid;border-color:#9dc49a;}
+.day.fc{background:#fbfdfa;}
+.day .dn{font-size:10.5px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:.4px;}
+.day .ic{font-size:20px;line-height:1.1;}
+.day .tt{font-size:11.5px;font-weight:700;}
+.day .tt span{color:var(--txt2);font-weight:500;}
+.chip{border-radius:12px;font-size:10.5px;font-weight:700;padding:2px 5px;border:1px solid transparent;}
+.day .wet{font-size:9.5px;color:var(--txt2);min-height:11px;}
+/* all-locations compare strip */
+.cmpchips{display:flex;gap:8px;flex-wrap:wrap;}
+.cmpchip{border:1.5px solid var(--bdr);border-radius:10px;padding:7px 12px;font-size:12px;cursor:pointer;display:flex;flex-direction:column;gap:3px;min-width:150px;background:var(--sur);font-family:inherit;color:var(--txt);text-align:left;}
+.cmpchip:hover{border-color:var(--acc2);}
+.cmpchip.on{outline:2px solid var(--acc);outline-offset:1px;}
+.cmpchip .cdh{font-weight:800;font-size:15px;display:flex;align-items:center;gap:6px;}
+.sbtn.on{background:var(--acc);border-color:var(--acc);color:#fff;}
+/* station-import mapper */
+.mapg{display:grid;grid-template-columns:auto 1fr auto;gap:5px 8px;align-items:center;margin-top:8px;font-size:12px;}
+.mapg .fl{margin:0;}
+.mapg select{font:inherit;font-size:12px;padding:4px 7px;border:1.5px solid var(--bdr);border-radius:7px;background:#fff;color:var(--txt);}
+table.prev{border-collapse:collapse;font-size:11px;margin-top:6px;}
+table.prev th,table.prev td{border:1px solid var(--bdr);padding:2px 6px;white-space:nowrap;}
+table.prev th{background:#f0f5ef;color:var(--txt2);font-size:10px;}
+/* chart */
+#chart-wrap{position:relative;}
+#chart-wrap svg{width:100%;height:auto;display:block;}
+#chart-tip{position:absolute;display:none;background:#182619;color:#fff;font-size:11.5px;padding:7px 10px;border-radius:8px;pointer-events:none;z-index:20;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.25);line-height:1.5;}
+/* hour table */
+table.hrs{width:100%;border-collapse:collapse;font-size:12.5px;}
+table.hrs th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--txt2);text-align:left;padding:4px 8px;border-bottom:1.5px solid var(--bdr);}
+table.hrs td{padding:4px 8px;border-bottom:1px solid #eef3ed;}
+tr.h-wet td{background:#f0f7fb;}
+tr.h-fc td{color:#5a6b60;}
+td.cum{font-weight:700;border-radius:0;}
+/* modals + forms */
+.mbg{display:none;position:fixed;inset:0;background:rgba(12,30,14,.55);z-index:1000;align-items:flex-start;justify-content:center;padding:26px 14px;overflow:auto;}
+.mbg.op{display:flex;}
+.mdl{background:#fff;border-radius:13px;max-width:560px;width:100%;padding:18px 20px;box-shadow:0 14px 44px rgba(0,0,0,.3);}
+.mdl h2{font-size:17px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;}
+.mx{border:none;background:none;font-size:22px;cursor:pointer;color:var(--txt2);line-height:1;}
+label.fl{font-size:11px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:.4px;display:block;margin:10px 0 3px;}
+input[type=text],input[type=number],input[type=date],select.inp{font:inherit;font-size:13px;padding:7px 10px;border:1.5px solid var(--bdr);border-radius:8px;width:100%;background:#fff;color:var(--txt);}
+input[type=number]{width:100px;}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;}
+.btn{font:inherit;font-size:12.5px;font-weight:700;padding:8px 15px;border-radius:8px;cursor:pointer;border:1.5px solid var(--bdr);background:#fff;color:var(--txt);}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff;}
+.btn.warn{border-color:#d9a0a0;color:var(--bad);}
+.sbtn{font:inherit;font-size:11px;font-weight:700;padding:4px 9px;border-radius:7px;cursor:pointer;border:1px solid var(--bdr);background:#fff;color:var(--txt);}
+.sbtn.pri{background:var(--acc);border-color:var(--acc);color:#fff;}
+.sbtn.warn{border-color:#d9a0a0;color:var(--bad);}
+.list{margin-top:10px;display:flex;flex-direction:column;}
+.li{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #eef3ed;font-size:13px;}
+.li .grow{flex:1;min-width:0;}
+.li small{color:var(--txt2);display:block;font-size:11px;}
+/* model page band table */
+table.bands{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px;}
+table.bands th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--txt2);text-align:left;padding:5px 8px;border-bottom:1.5px solid var(--bdr);}
+table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
+.banner{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:var(--bad);color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:700;z-index:2000;box-shadow:0 6px 20px rgba(0,0,0,.3);}
+.banner.show{display:block;}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#182619;color:#fff;padding:9px 16px;border-radius:9px;font-size:12.5px;z-index:2000;opacity:0;transition:opacity .25s;pointer-events:none;}
+.toast.show{opacity:.95;}
+.ftr{text-align:center;font-size:10.5px;color:var(--txt2);padding:10px;}
+.ftr a{color:var(--acc);}
+@media(max-width:820px){.days{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:520px){.days{grid-template-columns:repeat(2,minmax(0,1fr));}.main{padding:10px;}.bignum{font-size:34px;}}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <h1>🌿 BlightCast <span class="tag">boxwood blight risk planner</span></h1>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-left:10px;">
+    <button class="ntabb on" id="tab-risk" onclick="bcNav('risk')">📈 Risk</button>
+    <button class="ntabb" id="tab-model" onclick="bcNav('model')">📖 Model</button>
+    <button class="ntabb" id="tab-setup" onclick="bcNav('setup')">⚙ Setup</button>
+  </div>
+  <div class="sp"></div>
+</div>
+<div class="subbar">
+  <span class="locchips" id="loc-chips"></span>
+  <select class="pill" id="thr-sel" onchange="thrChange(this.value)" title="Your alert level — BlightCast tells you when accumulated risk is forecast to cross it"></select>
+  <button class="pill" style="background:var(--acc);border-color:var(--acc);color:#fff;" onclick="sprayFormOpen()">🧴 Log a spray</button>
+  <span class="note" id="wx-note"></span>
+</div>
+
+<div class="main">
+  <div class="page" id="page-risk">
+    <div class="panel" id="cmp-panel" style="display:none;">
+      <div class="wwh">🗺 All your locations <span class="note" style="font-weight:400;">click one to switch</span></div>
+      <div class="cmpchips" id="cmp-chips"></div>
+    </div>
+    <div class="panel" id="st-panel" style="display:none;">
+      <div class="statgrid">
+        <div><div class="bignum" id="st-num">0<small>infection degree-hours (DH)</small></div></div>
+        <div><span class="bandchip" id="st-band"></span></div>
+        <div class="statlines" id="st-lines"></div>
+      </div>
+    </div>
+    <div class="panel" id="chart-panel" style="display:none;">
+      <div class="wwh">📈 Accumulated infection risk
+        <span style="display:flex;gap:8px;align-items:center;">
+          <button class="sbtn" id="ly-btn" onclick="lyToggle()" title="Overlay the same weeks LAST YEAR (from the Open-Meteo weather archive) as a gray dashed line — see whether this season's blight pressure is running early or late">👻 Last year</button>
+          <button class="sbtn" onclick="chartSnapshot()" title="Save the chart as a picture (PNG) — with the location, current risk and credits on it, ready to text or email">📸 Snapshot</button>
+          <button class="sbtn" onclick="riskCsv()" title="Download the daily risk history as a spreadsheet (opens in Excel)">⬇ Daily</button>
+          <button class="sbtn" onclick="bcHourlyCsv()" title="Download the hour-by-hour record — temp, RH, rain, wind, leaf wetness (with its source), DH accrued and the running total (opens in Excel)">⬇ Hourly</button>
+          <select class="pill" style="font-size:12px;padding:4px 9px;" id="range-sel" onchange="rangeChange(this.value)">
+            <option value="7">Past 7 days + forecast</option>
+            <option value="14">Past 14 days + forecast</option>
+            <option value="31">Past 31 days + forecast</option>
+          </select>
+        </span>
+      </div>
+      <div id="chart-wrap"><div id="chart-tip"></div></div>
+      <div class="note" style="margin-top:6px;">Risk units (degree-hours, DH) accrue while leaves are wet at 44–86°F and <b>reset to zero after 6 straight dry hours</b>.
+      Colored bands are the model's published risk levels; the <span style="color:var(--blue);font-weight:700;">blue dashed line</span> is your alert level.
+      Hover for hour-by-hour detail; click to open that day's table below.</div>
+    </div>
+    <div class="days" id="days" style="display:none;"></div>
+    <div class="panel" id="detail" style="display:none;">
+      <h2 id="d-title"></h2>
+      <div class="sub" id="d-sub"></div>
+      <div style="overflow-x:auto;"><table class="hrs" id="d-table"></table></div>
+    </div>
+    <div class="panel" id="spray-panel" style="display:none;">
+      <div class="wwh">🧴 Sprays applied
+        <span style="display:flex;gap:8px;align-items:center;">
+          <button class="sbtn" onclick="sprayCsv()" title="Download the spray log as a spreadsheet (opens in Excel)">⬇ Excel</button>
+          <button class="sbtn pri" onclick="sprayFormOpen()">＋ Log a spray</button>
+        </span>
+      </div>
+      <div class="note">Log each protective fungicide with how long its label says it protects — the chart shades the protected window,
+      and the status card tells you when to re-cover. An optional <b>wash-off</b> amount (inches of rain) ENDS protection early when that
+      much rain falls after application — 7 rainy days are not 7 dry days; label days always stay the ceiling, since new growth is
+      unprotected no matter the weather. Save your usual products in <b>⚙ Setup → 🧴 My products</b> (or tick
+      "save as a preset" while logging) and logging becomes two clicks. (The model itself assumes <i>unprotected</i> plants.)</div>
+      <div class="list" id="spray-list"></div>
+    </div>
+    <div class="panel" id="empty-hint">
+      <h2>Welcome to BlightCast 🌿</h2>
+      <div class="sub" style="margin-bottom:0;">BlightCast runs the <b>USPest.org boxwood blight infection-risk model</b> (Oregon State University, v3.0)
+      on the weather at <i>your</i> spot — the last month of actual conditions plus the 7-day forecast — so you can see accumulated infection risk,
+      set your own alert level, and time protective sprays. Start on the <b>⚙ Setup</b> tab and add your <b>📍 location</b> (type your town — that's
+      the whole setup). Your data stays in this browser — nothing is uploaded anywhere.</div>
+    </div>
+  </div>
+
+  <div class="page" id="page-model" style="display:none;">
+    <div class="panel">
+      <div class="wwh">📖 How the model works</div>
+      <div style="font-size:13px;line-height:1.6;">
+      <p>Boxwood blight (<i>Calonectria pseudonaviculata</i>) infects when leaves are <b>wet</b> and temperatures are mild.
+      This tool implements the <b>boxwood blight infection risk model v3.0</b> published by Len Coop at Oregon State University
+      for USPest.org — a "degree-hours during leaf wetness" model:</p>
+      <ul style="margin:8px 0 8px 22px;">
+        <li>Each <b>wet hour</b> between 44°F and 86°F adds infection risk units (degree-hours, DH) from the model's published
+        temperature table — rising to a peak of 31.35 DH/hour at 76°F, then falling to zero at 86°F.</li>
+        <li>Dry hours add nothing, and <b>6 straight dry hours end the infection cycle</b> — accumulated DH resets to zero.</li>
+        <li>Without a leaf-wetness sensor, BlightCast estimates wetness each hour from Open-Meteo weather:
+        <b>rain</b> (following the model's precipitation-wetness rules) and <b>humidity/dew</b> (wet when RH reaches your
+        dew threshold — default 90% — in light wind). You can tune the sensitivity in ⚙ Setup — or bring in real
+        station data there (📡): link a nearby <b>NEWA network station</b>, connect your own station's cloud service
+        (<b>LI-COR Cloud</b> or any CSV/JSON data feed), or import a CSV by hand. Station readings override Open-Meteo
+        for the hours they cover, and a real leaf-wetness sensor is used by the model <b>directly</b>.</li>
+      </ul>
+      <p>Accumulated DH maps to the model's published risk levels:</p>
+      <div style="overflow-x:auto;"><table class="bands" id="band-table"></table></div>
+      <p style="margin-top:10px;">Lesion counts come from the model's regressions
+      (<i>highly susceptible</i> = English/true dwarf boxwood, <i>B. sempervirens</i> 'Suffruticosa';
+      <i>susceptible</i> = common American boxwood, <i>B. sempervirens</i>). Less susceptible cultivars run lower risk than shown —
+      set what grows at each location with the 🌱 dropdown in ⚙ Setup and the guidance lines adjust.</p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="wwh">⚠ Model assumptions — read once</div>
+      <div style="font-size:13px;line-height:1.6;">
+      <ul style="margin:0 0 0 22px;">
+        <li>The model assumes <b>inoculum is present</b> and the host is a susceptible, <b>not-yet-protected</b> cultivar. It predicts
+        <i>conditions favorable for infection</i> — not that infection has happened.</li>
+        <li>Lesion estimates are approximate, for gauging severity risk only.</li>
+        <li>Plants under <b>overhead irrigation or heavy shade run higher risk</b> than the model shows (it assumes ambient exposure).</li>
+        <li>In the very humid Southeast, humidity alone can sometimes wet canopies more than models capture — if outbreaks outrun the
+        numbers, lower the dew threshold in ⚙ Setup (e.g. 87%).</li>
+        <li>A forecast is a forecast: the last 7 days shown are <i>actual</i> weather, the next 7 are the forecast, and numbers can differ
+        from a weather station a few miles away. Scout your plants — the model never replaces monitoring.</li>
+      </ul>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="wwh">🎓 Credits &amp; further reading</div>
+      <div style="font-size:13px;line-height:1.6;">
+      <p>Model: <b>Boxwood Blight Infection Risk Model v3.0</b> (July 2023) by Len Coop, Oregon Integrated Pest Management Center,
+      Oregon State University — developed from Gehesquière (2014), Avenot et al. (2017, 2021) and Weiland et al. (2022), published at USPest.org.</p>
+      <p style="margin-top:6px;">
+      📄 <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">Model documentation (PDF)</a> ·
+      🌐 <a href="https://uspest.org/risk/boxwood_app" target="_blank" rel="noopener">USPest.org boxwood app</a> (same model on weather-station networks) ·
+      🗺 <a href="https://uspest.org/risk/boxwood_map" target="_blank" rel="noopener">USPest.org risk map</a></p>
+      <p style="margin-top:6px;">🛰 Station-data option: hourly observations served by <b>NEWA</b> — the Network for Environment and
+      Weather Applications at Cornell University — and its partner networks (Rutgers NJWxNet and others). Thanks to NEWA and the
+      station owners for keeping the data open.</p>
+      <p style="margin-top:6px;" class="note">BlightCast is an independent implementation for planning convenience and is not affiliated with
+      or endorsed by Oregon State University, USPest.org, Cornell University or NEWA. Without a linked station, weather comes from Open-Meteo
+      for your exact point, so readings can differ from station output. All predictions "as is" — the product label and your own scouting
+      always win.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-setup" style="display:none;">
+    <div class="panel">
+      <div class="wwh">📍 Locations</div>
+      <label class="fl">Find your town</label>
+      <div class="row"><div style="flex:1;"><input type="text" id="loc-q" placeholder="e.g. Bridgeton NJ" onkeydown="if(event.key==='Enter')locSearch()"></div>
+      <button class="btn pri" onclick="locSearch()">Search</button></div>
+      <div class="list" id="loc-results"></div>
+      <label class="fl">Saved locations</label>
+      <div class="list" id="loc-list"></div>
+      <div class="note" style="margin-top:8px;">🌱 The boxwood-type dropdown on each location tailors the guidance lines (first-infection level,
+      lesion estimates) to what grows there — the chart bands stay the model's published levels either way.
+      The <b>🔔 alert level</b> picked in the top bar is remembered <b>per location</b> too — an English hedge and a tolerant block
+      can watch different lines. New locations start at the shared default.</div>
+    </div>
+    <div class="panel">
+      <div class="wwh">📡 Real station data <span class="note" style="font-weight:400;">(optional — sharpens the model)</span></div>
+      <div class="note">BlightCast normally runs on Open-Meteo's modeled weather for your exact spot. Real station readings
+      <b>override Open-Meteo for the hours they cover</b> — and a real <b>leaf-wetness sensor is used by the model directly</b>,
+      which beats estimating wetness from humidity. Open-Meteo still fills any gaps plus the 7-day forecast. Two ways in:</div>
+
+      <label class="fl" style="margin-top:12px;">Option A — 🛰 link a NEWA / partner-network station (automatic)</label>
+      <div class="note">If there's a station near you on <a href="https://newa.cornell.edu" target="_blank" rel="noopener">NEWA</a>
+      (Cornell's ag-weather network — includes partner networks like Rutgers NJWxNet and many nursery/orchard stations, most with
+      leaf-wetness sensors), BlightCast can pull its hourly data automatically — no file handling, refreshed every time you open
+      the page. Reading station data is free and needs no account.</div>
+      <div class="list" id="newa-status"></div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn" onclick="newaFind()" id="newa-find-btn">🔍 Find stations near the active location</button>
+      </div>
+      <div class="list" id="newa-results"></div>
+
+      <label class="fl" style="margin-top:14px;">Option B — 🔌 connect your station's own cloud service (automatic)</label>
+      <div class="note">If your weather station reports to a cloud service, BlightCast can pull from it directly.
+      <b>LI-COR Cloud</b> (HOBO RX loggers) is built in — paste the API token from licor.cloud → Data → API and pick your
+      logger; a leaf-wetness sensor on it is used by the model directly. Any other service works through a <b>data-feed
+      link</b>: an address that returns readings as CSV or JSON (most station services and mesonets have one — the key
+      goes in the address), mapped once on a preview screen and refreshed automatically after that. Tokens and links stay
+      in this browser and are <b>never</b> included in 🔗 setup share-links.</div>
+      <div class="list" id="api-status"></div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn" onclick="apiLicorOpen()">🔌 Connect LI-COR Cloud</button>
+        <button class="btn" onclick="apiFeedConnect()">🔗 Connect a data feed (CSV/JSON URL)</button>
+      </div>
+
+      <label class="fl" style="margin-top:14px;">Option C — 📂 import a CSV from your own station or a download</label>
+      <div class="note"><b>What the file needs:</b> a <b>header row</b> naming the columns, then <b>one row per hour</b>
+      (finer is fine — 15-minute rows are averaged into hours automatically). <b>Required:</b> a date+time column (or separate
+      date and time columns) and <b>air temperature</b>. <b>Used when present:</b> humidity %, rain, wind speed, and leaf wetness
+      (minutes-wet-per-hour, a 0–10 score, or wet/dry — any of the three). Dates are read as <b>month/day/year</b>, times as local
+      time at the station; columns can be in any order and named almost anything — you confirm the mapping on a preview screen
+      before anything is saved. Re-import a fresh download any time: new hours merge in. The file is read right here in your
+      browser — nothing is uploaded anywhere.</div>
+      <div class="list" id="stn-status"></div>
+      <div class="row" style="margin-top:10px;">
+        <label class="btn pri" style="margin:0;font-size:12.5px;">📂 Import a weather CSV<input type="file" accept=".csv,.txt,.tsv" style="display:none;" onchange="stnFile(this)"></label>
+        <button class="btn" onclick="stnExample()" title="Downloads a small CSV in a layout BlightCast reads perfectly — match your export to it, or just eyeball the shape">⬇ Example CSV</button>
+      </div>
+      <div class="note" style="margin-top:8px;">Known-good sources: Davis WeatherLink exports, Onset HOBO, Spectrum WatchDog,
+      Rainwise, <a href="https://uspest.org/wea/" target="_blank" rel="noopener">USPest.org</a> hourly downloads, and most state
+      mesonet "download hourly data" pages. If a file won't read, the preview screen says why — usually the date column pick.</div>
+    </div>
+    <div class="panel">
+      <div class="wwh">💧 Leaf-wetness sensitivity</div>
+      <div class="note">Leaves count as wet during rain, right after rain, and when the air is humid and calm. These two dials tune the humidity side.</div>
+      <div class="row" style="margin-top:8px;">
+        <div><label class="fl">Dew threshold — wet at RH ≥ (%)</label><input type="number" id="set-rh" min="80" max="99" onchange="setChange()"></div>
+        <div><label class="fl">Wetness needed to count (1–10)</label><input type="number" id="set-lw" min="1" max="10" onchange="setChange()"></div>
+      </div>
+      <div class="note" style="margin-top:8px;">Defaults (90% · 1) match the model's own settings. Humid Southeast: try 87%. Getting wet-hours
+      on days you know were dry: raise the dew threshold, or require more wetness (2–3).</div>
+    </div>
+    <div class="panel">
+      <div class="wwh">🧴 My products <button class="sbtn pri" onclick="prodEdit(null)">＋ New product</button></div>
+      <div class="note">Your usual protective sprays — name, how many days the label says it protects, and (optionally) the FRAC group.
+      They become one-click presets in the 🧴 Log-a-spray form, and a FRAC group turns on a gentle rotation nudge
+      (warning only — it never blocks a save).</div>
+      <div class="list" id="prod-list"></div>
+      <div id="prod-form" style="display:none;border-top:1.5px solid var(--bdr);margin-top:10px;">
+        <label class="fl">Product name</label><input type="text" id="pr-name" placeholder="e.g. chlorothalonil">
+        <div class="row">
+          <div><label class="fl">Protects for (days)</label><input type="number" id="pr-days" min="1" max="30" value="7"></div>
+          <div><label class="fl">FRAC group (optional)</label><input type="text" id="pr-frac" placeholder="e.g. M5" style="width:100px;"></div>
+          <div><label class="fl">Wash-off at (inches rain, optional)</label><input type="number" id="pr-wash" min="0.1" step="0.1" placeholder="e.g. 1.0" style="width:110px;"></div>
+        </div>
+        <div class="note" style="margin-top:4px;">Wash-off: rain since application reaching this total ENDS the protection early (label days always stay the ceiling —
+        a dry spell never stretches them). Common protectant guidance is around 1″.</div>
+        <div class="row" style="margin-top:12px;">
+          <button class="btn pri" onclick="prodSave()">💾 Save product</button>
+          <button class="btn" onclick="document.getElementById('prod-form').style.display='none'">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="wwh">🔔 Alerts on this computer <button class="sbtn" id="bell-btn" onclick="bellToggle()">🔕 Alerts</button></div>
+      <div class="note">When ON, BlightCast chimes and pops a note whenever a <b>new</b> forecast crossing of your alert level appears —
+      it works while the page is open. For reminders that reach you when BlightCast is closed, use the 📅 button on the
+      re-spray recommendation: the calendar file carries its own 12-hour and 1-hour reminders into Outlook, Gmail or Apple Calendar.</div>
+    </div>
+    <div class="panel">
+      <div class="wwh">📤 Spray log → a shared Google Sheet</div>
+      <div class="note">Give the whole team a live list of what's been applied without anyone opening BlightCast:
+      every 🧴 log entry (and removals) is written to a Google Sheet <b>you</b> own. One-time setup, about 3 minutes:
+      <ol style="margin:6px 0 0 18px;line-height:1.6;">
+        <li>Make a <b>Google Form</b> with <b>short-answer</b> questions: <i>Date, Product, Days, FRAC, Location, Notes, Status, DH</i>
+        (name them however you like; Date-type questions work too). <b>Leave every question NOT-required</b>, set Settings → Responses →
+        <b>Collect email addresses: OFF</b> — and then click <b>Publish</b> (top right; an unpublished form rejects every row).</li>
+        <li>In the form's <b>Responses</b> tab click the Sheets icon — that spreadsheet is the shared log.</li>
+        <li>In the form: ⋮ menu → <b>Get pre-filled link</b> → type the words <b>date, product, days, frac, location, notes, status, dh</b>
+        into their matching boxes → <b>Get link</b> → copy → paste below.</li>
+      </ol></div>
+      <div class="row" style="margin-top:10px;"><div style="flex:1;"><input type="text" id="bgs-link" placeholder="paste the pre-filled link… (docs.google.com/forms/…/viewform?…entry.123=date…)"></div>
+      <button class="btn pri" onclick="bcSheetConnect()">Connect</button></div>
+      <div class="list" id="bgs-status"></div>
+      <div class="note" style="margin-top:6px;">Sends are one-way and invisible (Google doesn't let the page read the result) — the 🧪 test row
+      confirms the pipe once. The connection rides your backup/share file, so a coworker who imports it writes to the same sheet.</div>
+    </div>
+    <div class="panel">
+      <div class="wwh">💾 Backup &amp; sharing</div>
+      <div class="note">Your data lives only in this browser. The backup file is also how you <b>share</b> your setup with a coworker — they import it on their computer.</div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn pri" onclick="backExport()">⬇ Export backup / share file</button>
+        <label class="btn" style="margin:0;font-size:12.5px;">📂 Import a file<input type="file" accept=".json" style="display:none;" onchange="backImport(this)"></label>
+        <button class="btn" onclick="shareLink()" title="Copies a link that carries your locations, boxwood types and alert level — a colleague opens it and their BlightCast is set up (their spray log and weather data are their own)">🔗 Copy a setup link</button>
+      </div>
+      <div class="note" style="margin-top:10px;" id="back-note"></div>
+    </div>
+    <div class="panel">
+      <div class="wwh">ℹ About BlightCast</div>
+      <div style="font-size:13px;line-height:1.55;">
+      <p><b>Privacy, plainly:</b> there is no account, no install, and nothing you enter is uploaded anywhere. Your locations, settings,
+      spray log and any weather file you import are stored only in this browser on this computer (imported files are read right here in the
+      browser). The only internet requests are to <b>Open-Meteo</b> (a free public weather service) for hourly weather, town search and the
+      last-year archive — plus, only for sources you connect yourself in ⚙ Setup: <b>NEWA's</b> public station service at Cornell
+      (newa.nrcc.cornell.edu / hrly.nrcc.cornell.edu), <b>LI-COR Cloud</b> (api.licor.cloud — your token goes only there, stored only in
+      this browser), a data-feed address you provide, or — if you connect the optional 📤 sheet bridge — spray-log rows written to the
+      Google Form/Sheet <b>you</b> set up. Tokens and feed links are never included in 🔗 setup share-links.</p>
+      <p style="margin-top:8px;"><b>A model is a model:</b> BlightCast is planning help, not a diagnosis. It flags conditions favorable for
+      infection assuming the pathogen is around — scouting and the product label always win. See the 📖 Model tab for assumptions and credits.</p>
+      <p style="margin-top:8px;color:var(--txt2);">BlightCast is a small taste of the farm-management system built at Overdevest Nurseries —
+      spray records, scouting, inventory, compliance and more. Curious? Ask Caryn.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ftr">BlightCast v0.10 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
+built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
+
+<!-- ── Log-a-spray modal ───────────────────────────────────────────────── -->
+<div class="mbg" id="m-spray"><div class="mdl" style="max-width:460px;">
+  <h2>🧴 Log a protective spray <button class="mx" onclick="mClose('m-spray')">×</button></h2>
+  <div id="sf-preset-row">
+    <label class="fl">Pick a saved product</label>
+    <select class="inp" id="sf-preset" onchange="sfPreset()"></select>
+  </div>
+  <label class="fl">Date applied</label><input type="date" id="sf-date">
+  <label class="fl">Product / note</label><input type="text" id="sf-name" placeholder="e.g. chlorothalonil — front hedge">
+  <div class="row">
+    <div><label class="fl">Protects for (days — check the label)</label><input type="number" id="sf-days" min="1" max="30" value="7"></div>
+    <div><label class="fl">FRAC group (optional)</label><input type="text" id="sf-frac" placeholder="e.g. M5" style="width:100px;"></div>
+    <div><label class="fl">Wash-off at (″ rain, optional)</label><input type="number" id="sf-wash" min="0.1" step="0.1" placeholder="e.g. 1.0" style="width:100px;"></div>
+  </div>
+  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:10px;cursor:pointer;"><input type="checkbox" id="sf-save"> Save as a preset for next time</label>
+  <div class="row" style="margin-top:14px;">
+    <button class="btn pri" onclick="spraySave()">💾 Save</button>
+    <button class="btn" onclick="mClose('m-spray')">Cancel</button>
+  </div>
+</div></div>
+
+<!-- ── LI-COR Cloud connect modal ──────────────────────────────────────── -->
+<div class="mbg" id="m-api"><div class="mdl" style="max-width:560px;">
+  <h2>🔌 Connect LI-COR Cloud <button class="mx" onclick="mClose('m-api')">×</button></h2>
+  <div class="note">For HOBO RX loggers on LI-COR Cloud. Get the token at <b>licor.cloud → Data → API</b> — it lets
+  BlightCast <i>read</i> your station. It is stored only in this browser, for the location that's active right now
+  (<b id="al-locname"></b>).</div>
+  <label class="fl">API token</label>
+  <input type="text" id="al-token" placeholder="paste the Bearer token…">
+  <div class="row" style="margin-top:10px;">
+    <button class="btn pri" onclick="apiLicorFind()">🔍 Find my loggers</button>
+  </div>
+  <div class="list" id="al-results"></div>
+</div></div>
+
+<!-- ── Station-data import modal (CSV column mapper) ───────────────────── -->
+<div class="mbg" id="m-stn"><div class="mdl" style="max-width:660px;">
+  <h2>📡 Import weather data <button class="mx" onclick="mClose('m-stn')">×</button></h2>
+  <div class="note">BlightCast guessed which column is which from your header row — fix any picks below and the
+  preview updates. <b>Required:</b> a date/time and a temperature. Dates read as month/day/year, times as local.</div>
+  <div class="note" id="stn-fname" style="margin-top:4px;"></div>
+  <label class="fl">For location</label>
+  <select class="inp" id="stn-loc" onchange="stnPreview()"></select>
+  <div class="mapg" id="stn-map"></div>
+  <div id="stn-prev" style="overflow-x:auto;"></div>
+  <div class="note" id="stn-parsenote" style="margin-top:6px;"></div>
+  <div class="row" style="margin-top:12px;">
+    <button class="btn pri" onclick="stnImport()">📥 Import</button>
+    <button class="btn" onclick="mClose('m-stn')">Cancel</button>
+  </div>
+</div></div>
+
+<div class="banner" id="save-banner">⚠ SAVE FAILED — your browser storage may be full or blocked. Export a backup NOW.</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════
+   Storage — guarded: a failed save is NEVER silent (farm-hub lesson).
+   ════════════════════════════════════════════════════════════════════════ */
+var BCK={locs:'blightcast_locations_v1',state:'blightcast_state_v1',sprays:'blightcast_sprays_v1',prods:'blightcast_products_v1'};
+function bcLoadK(k,fb){try{var v=JSON.parse(localStorage.getItem(k)||'null');return v==null?fb:v;}catch(e){return fb;}}
+function bcSaveK(k,v){try{localStorage.setItem(k,JSON.stringify(v));document.getElementById('save-banner').classList.remove('show');return true;}
+  catch(e){document.getElementById('save-banner').classList.add('show');return false;}}
+function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('show');},2600);}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Risk engine — PURE functions (guard-tested in blightcast_test.js).
+   USPest.org boxwood blight infection risk model v3.0 (Coop, OSU, 2023).
+   ════════════════════════════════════════════════════════════════════════ */
+/* Appendix I lookup: DH infection-risk units per WET hour, by °F.
+   Index 0 = 43°F … index 43 = 86°F. Rise 0.95/°F from 44 to the 76°F peak
+   (31.35), then the table's published fall to 0 at 86. */
+var BC_DH=[0,0.95,1.9,2.85,3.80,4.75,5.70,6.65,7.60,8.55,9.50,10.45,11.40,12.35,13.30,14.25,15.20,16.15,17.10,18.05,19.00,19.95,20.90,21.85,22.80,23.75,24.70,25.65,26.60,27.55,28.50,29.45,30.40,31.35,27.96,24.63,21.29,17.96,14.63,11.29,7.96,4.63,1.29,0.00];
+function bcDHforTemp(tF){
+  if(tF==null||isNaN(tF))return 0;
+  var t=Math.round(tF);
+  if(t<=43||t>=86)return 0;
+  return BC_DH[t-43];
+}
+/* Published risk levels (DH thresholds + the lesion meaning of each).
+   "highly susc." = English boxwood, "susc." = American boxwood. */
+var BC_BANDS=[
+ {at:0,  name:'Low',                         sub:'below first-infection level',                    txt:'#1d7a3a',bg:'#e2f3e6',bd:'#a9d6b4'},
+ {at:56, name:'First infection · highly susc.',sub:'first lesions possible on highly susceptible varieties',txt:'#5f7000',bg:'#eef3d2',bd:'#c9d68a'},
+ {at:160,name:'First infection · susceptible', sub:'first lesions possible on susceptible varieties',txt:'#9a6b00',bg:'#fdf3d9',bd:'#e6cd8a'},
+ {at:250,name:'Moderate',                    sub:'~6 lesions/plant highly susc. · 1 susceptible',  txt:'#b05a00',bg:'#fdeadc',bd:'#eec394'},
+ {at:400,name:'High',                        sub:'~12 lesions/plant highly susc. · 3 susceptible', txt:'#b8341e',bg:'#fce3dd',bd:'#efb3a6'},
+ {at:550,name:'Very high',                   sub:'~18 lesions/plant highly susc. · 5 susceptible', txt:'#a12a2a',bg:'#fbecec',bd:'#e6a9a9'}
+];
+function bcBand(cum){var b=BC_BANDS[0];for(var i=0;i<BC_BANDS.length;i++)if(cum>=BC_BANDS[i].at)b=BC_BANDS[i];return b;}
+/* Precipitation leaf wetness — the model's "FoxLW" rules, on an hourly step.
+   h: {rain(in), wind(mph), isDay, month(1-12)}; prev = previous hour. */
+function bcFoxLW(h,prev){
+  var rain=h.rain||0,wind=h.wind==null?0:h.wind;
+  var summer=h.month>=5&&h.month<=9;
+  if(rain>=0.05)return 10;
+  if(rain>=0.02)return (summer&&h.isDay)?5:10;
+  if(rain>0.01)return wind<=5?3:0;
+  /* carryover: leaves stay wet ~1 h after rain ends at night in light wind;
+     they dry within the hour by day or when it's windy */
+  if(prev&&(prev.rain||0)>0.01&&!h.isDay&&wind<10)return 3;
+  return 0;
+}
+/* Dew/humidity leaf wetness — calm humid air condenses on dense boxwood
+   canopies (proxy for the Kim fuzzy-logic model USPest uses). rhWet is the
+   user's dew threshold (default 90%). */
+function bcDewLW(h,rhWet){
+  if(h.rh==null||h.wind==null)return 0;
+  if(h.wind>=11)return 0;
+  if(h.rh>=97)return 8;
+  if(h.rh>=rhWet)return h.rh>=(rhWet+97)/2?5:2;
+  return 0;
+}
+/* like USPest: the two wetness estimates run in parallel — take the max.
+   An OBSERVED leaf-wetness reading (imported station data) beats both. */
+function bcLW(h,prev,rhWet){
+  if(h.lwObs!=null&&!isNaN(h.lwObs))return h.lwObs;
+  return Math.max(bcFoxLW(h,prev),bcDewLW(h,rhWet));
+}
+/* The accumulator. hours: [{t,temp,rh,rain,wind,isDay,month}] hourly, oldest
+   first. Returns one record per hour. Reset rule: MORE than 5 dry hours ends
+   the infection cycle — on an hourly step that means the 6th consecutive dry
+   hour zeroes the accumulation. */
+function bcRun(hours,opts){
+  opts=opts||{};
+  var rhWet=opts.rhWet||90,lwWet=opts.lwWet||1,resetDry=opts.resetDry||6;
+  var cum=0,dry=resetDry,out=[];
+  for(var i=0;i<hours.length;i++){
+    var h=hours[i];
+    /* a gap in the record (merged station data can be disjoint) counts as
+       dry hours — conservative: unknown weather never accrues risk */
+    if(i>0&&h.t&&hours[i-1].t){
+      var gapMs=new Date(h.t+':00')-new Date(hours[i-1].t+':00');
+      var gapH=Math.round(gapMs/3600000);
+      if(gapH>1){dry+=gapH-1;if(dry>=resetDry)cum=0;}
+    }
+    var lw=bcLW(h,i>0?hours[i-1]:null,rhWet);
+    var wet=lw>=lwWet,add=0,reset=false;
+    if(wet){dry=0;add=bcDHforTemp(h.temp);cum+=add;}
+    else{dry++;if(dry===resetDry&&cum>0){cum=0;reset=true;}else if(dry>=resetDry)cum=0;}
+    out.push({t:h.t,lw:lw,wet:wet,add:add,cum:Math.round(cum*100)/100,dry:dry,reset:reset});
+  }
+  return out;
+}
+/* first index at/after fromIdx where cum climbs to >= thr (a crossing, not
+   just being above — so a season already above doesn't re-fire) */
+function bcCrossing(run,thr,fromIdx){
+  for(var i=Math.max(0,fromIdx);i<run.length;i++){
+    var prev=i>0?run[i-1].cum:0;
+    if(run[i].cum>=thr&&prev<thr)return i;
+  }
+  return -1;
+}
+/* the model's lesion regressions (approximate by design) */
+function bcLesions(dh){
+  return {engl:Math.max(0,0.0552*dh-3.186),amer:Math.max(0,0.0175*dh-1.0881)};
+}
+/* rain wash-off (2026-08-10, Caryn design call): label DAYS stay the
+   CEILING of protection — weather can only SHORTEN it, never stretch it
+   (new growth is unprotected regardless of a dry spell). Rain is counted
+   from the day AFTER application (the spray goes on in a dry window).
+   bcWashoutDate → the day cumulative rain reaches the product's wash-off
+   threshold (actual + forecast hours alike); null = not reached. */
+function bcWashoutDate(hours,sprayDateISO,washIn){
+  var w=parseFloat(washIn);
+  if(!(w>0)||!hours||!hours.length)return null;
+  var cum=0;
+  for(var i=0;i<hours.length;i++){
+    var h=hours[i];
+    if(h.date<=sprayDateISO)continue;
+    cum+=(h.rain||0);
+    if(cum>=w)return h.date;
+  }
+  return null;
+}
+/* rain fallen since application (through nowT when given) — the "0.6″ of
+   1.0″ so far" display */
+function bcRainSince(hours,sprayDateISO,nowT){
+  var cum=0;
+  for(var i=0;i<(hours||[]).length;i++){
+    var h=hours[i];
+    if(h.date<=sprayDateISO)continue;
+    if(nowT&&h.t>nowT)break;
+    cum+=(h.rain||0);
+  }
+  return Math.round(cum*100)/100;
+}
+/* protective-spray window: latest still-active protection for a location.
+   hours (optional) enables the rain wash-off cut: protection ends at the
+   EARLIER of label days and the day before wash-off. */
+function bcProtectedUntil(sprays,locId,todayISO,hours){
+  var best=null;
+  (sprays||[]).forEach(function(s){
+    if(locId&&s.locId&&s.locId!==locId)return;
+    var d=new Date(s.date+'T12:00:00');d.setDate(d.getDate()+(parseInt(s.days,10)||0));
+    var end=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+    var washed=false;
+    if(hours&&s.wash){
+      var wd=bcWashoutDate(hours,s.date,s.wash);
+      if(wd){
+        var wd2=new Date(wd+'T12:00:00');wd2.setDate(wd2.getDate()-1);
+        var wISO=wd2.getFullYear()+'-'+('0'+(wd2.getMonth()+1)).slice(-2)+'-'+('0'+wd2.getDate()).slice(-2);
+        if(wISO<end){end=wISO;washed=true;}
+      }
+    }
+    if(end>=todayISO&&(!best||end>best.end))best={end:end,name:s.name||'',date:s.date,washed:washed};
+  });
+  return best;
+}
+/* Open-Meteo hourly arrays → one flat hour list, oldest first */
+function bcHours(d){
+  if(!d||!d.hourly||!d.hourly.time)return[];
+  return d.hourly.time.map(function(t,i){
+    return {t:t,date:t.slice(0,10),hour:parseInt(t.slice(11,13),10),month:parseInt(t.slice(5,7),10),
+      temp:d.hourly.temperature_2m[i],rh:d.hourly.relative_humidity_2m[i],dew:d.hourly.dew_point_2m[i],
+      rain:d.hourly.precipitation[i],wind:d.hourly.wind_speed_10m[i],isDay:d.hourly.is_day[i]===1};
+  });
+}
+/* first index AFTER the location-local "now" hour string (YYYY-MM-DDTHH:00) */
+function bcNowIdx(hours,nowT){
+  for(var i=0;i<hours.length;i++)if(hours[i].t>nowT)return i;
+  return hours.length;
+}
+/* group hours+run into local days for the cards + hour tables */
+function bcDaysBuild(hours,run,daily){
+  var out=[],map={};
+  for(var i=0;i<hours.length;i++){
+    var h=hours[i],d=map[h.date];
+    if(!d){d={date:h.date,dow:new Date(h.date+'T12:00:00').getDay(),rows:[],wetH:0,endCum:0,maxCum:0};map[h.date]=d;out.push(d);}
+    d.rows.push({h:h,r:run[i],idx:i});
+    if(run[i].wet)d.wetH++;
+    d.endCum=run[i].cum;
+    if(run[i].cum>d.maxCum)d.maxCum=run[i].cum;
+  }
+  if(daily&&daily.time)out.forEach(function(d){
+    var di=daily.time.indexOf(d.date);
+    if(di>=0){d.hi=daily.temperature_2m_max[di];d.lo=daily.temperature_2m_min[di];
+      d.icon=WXICON[daily.weather_code[di]]||'🌤';}
+  });
+  return out;
+}
+function bcFmtHour(h){h=((h%24)+24)%24;var ap=h<12?'AM':'PM';var x=h%12;if(x===0)x=12;return x+' '+ap;}
+/* town search helpers — the Open-Meteo geocoder matches PLACE NAMES only;
+   peel a trailing state off the query, then filter results to it */
+var US_STATES={AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming',DC:'District of Columbia'};
+function bcParseQuery(q){
+  q=String(q||'').trim().replace(/,/g,' ').replace(/\s+/g,' ');
+  var toks=q.split(' ');
+  if(toks.length>1){
+    var up=toks[toks.length-1].toUpperCase();
+    if(US_STATES[up])return{name:toks.slice(0,-1).join(' '),state:US_STATES[up]};
+    var lower=q.toLowerCase();
+    for(var k in US_STATES){var st=US_STATES[k].toLowerCase();
+      if(lower.length>st.length&&lower.slice(-st.length-1)===(' '+st))
+        return{name:q.slice(0,q.length-st.length-1).trim(),state:US_STATES[k]};}
+  }
+  return{name:q,state:null};
+}
+function bcFilterResults(res,state){
+  if(!state||!res||!res.length)return res||[];
+  var m=res.filter(function(r){return(r.admin1||'')===state;});
+  return m.length?m:res;
+}
+/* CSV building (Excel-friendly; the download adds a UTF-8 BOM) */
+function bcCsvCell(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function bcCsv(rows){return rows.map(function(r){return r.map(bcCsvCell).join(',');}).join('\r\n');}
+/* accumulated DH standing on a given date — the noon value if the hour is in
+   the loaded window, else the day's last hour; null when outside the window */
+function bcDHatDate(hours,run,dateISO){
+  var last=null;
+  for(var i=0;i<hours.length;i++){
+    if(hours[i].date===dateISO){last=run[i];if(hours[i].hour===12)return run[i];}
+    else if(hours[i].date>dateISO)break;
+  }
+  return last;
+}
+/* re-spray planner: first future hour at/above the alert level that is NOT
+   covered by logged protection. Recommend spraying that day — or the day
+   before when the risk moment lands before 10 AM. Returns null or
+   {idx, dateISO}. */
+function bcSprayBy(run,hours,nowIdx,thr,protEnd,todayISO){
+  for(var i=Math.max(0,nowIdx);i<run.length;i++){
+    if(run[i].cum<thr)continue;
+    if(protEnd&&hours[i].date<=protEnd)continue;
+    var date=hours[i].date;
+    if(hours[i].hour<10){
+      var d=new Date(date+'T12:00:00');d.setDate(d.getDate()-1);
+      date=d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+    }
+    /* "spray the day before" must never point at a day already gone —
+       9 AM risk seen at 7 AM the same day means protect TODAY */
+    if(todayISO&&date<todayISO)date=todayISO;
+    return {idx:i,dateISO:date};
+  }
+  return null;
+}
+/* FRAC group of the most recent logged spray at a location (rotation nudge) */
+function bcLastFrac(sprays,locId){
+  var last=null;
+  (sprays||[]).forEach(function(s){
+    if(locId&&s.locId&&s.locId!==locId)return;
+    if(!s.frac||!String(s.frac).trim())return;
+    if(!last||s.date>last.date)last=s;
+  });
+  return last?String(last.frac).trim().toUpperCase():null;
+}
+/* ICS builder: floating local times + two built-in reminders (12h, 1h).
+   Works in Outlook, Gmail and Apple Calendar alike. */
+function bcIcsEscape(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');}
+function bcIcs(evts,stamp){
+  var L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//BlightCast//EN','CALSCALE:GREGORIAN'];
+  evts.forEach(function(e){
+    L.push('BEGIN:VEVENT','UID:'+e.uid,'DTSTAMP:'+stamp,'DTSTART:'+e.start,'DTEND:'+e.end,'SUMMARY:'+bcIcsEscape(e.summary));
+    if(e.desc)L.push('DESCRIPTION:'+bcIcsEscape(e.desc));
+    L.push('BEGIN:VALARM','TRIGGER:-PT12H','ACTION:DISPLAY','DESCRIPTION:'+bcIcsEscape('Coming up: '+e.summary),'END:VALARM');
+    L.push('BEGIN:VALARM','TRIGGER:-PT1H','ACTION:DISPLAY','DESCRIPTION:'+bcIcsEscape('In 1 hour: '+e.summary),'END:VALARM');
+    L.push('END:VEVENT');
+  });
+  L.push('END:VCALENDAR');
+  return L.join('\r\n')+'\r\n';
+}
+
+/* ── imported weather data (own station / USPest download) ──────────────
+   All pure, guard-tested. Column mapper feeds bcStnHours; the result
+   overrides Open-Meteo hour-for-hour via bcMergeHours. */
+/* CSV/TSV text → rows of cells. Handles quoted cells; delimiter auto:
+   tab, then semicolon vs comma by count on the first line. */
+function bcCsvParse(text){
+  text=String(text||'').replace(/\r\n?/g,'\n');
+  var nl=text.indexOf('\n'),first=nl<0?text:text.slice(0,nl);
+  var delim=first.indexOf('\t')>=0?'\t':(first.split(';').length>first.split(',').length?';':',');
+  var rows=[],row=[],cell='',q=false;
+  for(var i=0;i<text.length;i++){
+    var c=text[i];
+    if(q){
+      if(c==='"'){if(text[i+1]==='"'){cell+='"';i++;}else q=false;}
+      else cell+=c;
+    } else if(c==='"')q=true;
+    else if(c===delim){row.push(cell);cell='';}
+    else if(c==='\n'){row.push(cell);cell='';
+      if(row.some(function(x){return x.trim()!=='';}))rows.push(row);
+      row=[];}
+    else cell+=c;
+  }
+  if(cell!==''||row.length){row.push(cell);
+    if(row.some(function(x){return x.trim()!=='';}))rows.push(row);}
+  return rows;
+}
+/* guess which column is which from the header row; -1 = not found */
+function bcColGuess(header){
+  var map={dt:-1,date:-1,time:-1,temp:-1,rh:-1,rain:-1,wind:-1,lw:-1};
+  function set(k,i){if(map[k]<0)map[k]=i;}
+  (header||[]).forEach(function(h,i){
+    var s=String(h||'').toLowerCase();
+    if(!s)return;
+    if(/timestamp|date.?time/.test(s))set('dt',i);
+    else if(/\bdate\b|^date/.test(s))set('date',i);
+    else if(/\btime\b|^hour\b|^hr\b/.test(s))set('time',i);
+    else if(/leaf|wetness|\blw\b|\bwet\b/.test(s)&&!/bulb/.test(s))set('lw',i);
+    else if(/dew/.test(s))return;
+    else if(/temp|\btair\b|°/.test(s)&&!/soil|bulb/.test(s))set('temp',i);
+    else if(/humid|\brh\b/.test(s))set('rh',i);
+    else if(/rain|precip|prcp/.test(s))set('rain',i);
+    else if(/wind|wnd|wspd/.test(s)&&!/gust|dir/.test(s))set('wind',i);
+  });
+  return map;
+}
+/* many station date/time formats → 'YYYY-MM-DDTHH:00' (station local time).
+   Accepts ISO, M/D/YYYY, am/pm, 24h, bare-hour and hundreds ("1300", USPest
+   "2400" = midnight of the NEXT day). Returns null when unreadable. */
+function bcParseTs(dateS,timeS){
+  var s=String(dateS==null?'':dateS).trim();
+  if(timeS!=null&&String(timeS).trim()!=='')s+=' '+String(timeS).trim();
+  if(!s)return null;
+  var y,mo,d,m=s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m){y=+m[1];mo=+m[2];d=+m[3];}
+  else{
+    m=s.match(/(\d{1,2})[\/\.](\d{1,2})[\/\.](\d{2,4})/);
+    if(!m)return null;
+    mo=+m[1];d=+m[2];y=+m[3];if(y<100)y+=2000;
+  }
+  var rest=s.slice(s.indexOf(m[0])+m[0].length);
+  var hh=null,t=rest.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp])\.?[Mm]/);
+  if(t){hh=(+t[1])%12;if(/p/i.test(t[3]))hh+=12;}
+  if(hh==null){t=rest.match(/\b(\d{1,2})\s*([AaPp])\.?[Mm]\b/);if(t){hh=(+t[1])%12;if(/p/i.test(t[2]))hh+=12;}}
+  if(hh==null){t=rest.match(/(\d{1,2}):(\d{2})/);if(t)hh=+t[1];}
+  if(hh==null){t=rest.match(/\b(\d{3,4})\b/);if(t&&+t[1]>=100)hh=Math.floor(+t[1]/100);}
+  if(hh==null){t=rest.match(/\b(\d{1,2})\b/);if(t)hh=+t[1];}
+  if(hh==null)hh=0;
+  if(mo<1||mo>12||d<1||d>31||hh>24)return null;
+  var roll=hh===24;if(roll)hh=0;
+  var dt=new Date(y,mo-1,d,hh);
+  if(roll)dt.setDate(dt.getDate()+1);
+  return dt.getFullYear()+'-'+('0'+(dt.getMonth()+1)).slice(-2)+'-'+('0'+dt.getDate()).slice(-2)+'T'+('0'+dt.getHours()).slice(-2)+':00';
+}
+/* data rows + column map + units → hourly records for the engine.
+   Sub-hourly rows are aggregated per hour: temp/RH/wind mean, rain SUM,
+   leaf wetness by detected mode (wet/dry flag · 0–10 scale · minutes wet).
+   units: {temp:'F'|'C', rain:'in'|'mm', wind:'mph'|'kmh'|'ms', lw:'auto'|mode}
+   Returns {hours:[…], bad:<unreadable rows>, lwMode}. */
+function bcStnHours(rows,map,units){
+  units=units||{};
+  var acc={},order=[],bad=0,lwMax=0,hasLw=map.lw>=0;
+  function num(v){if(v==null)return null;v=String(v).trim().replace(/[^0-9.\-]/g,'');if(v===''||v==='-'||v==='.')return null;var n=parseFloat(v);return isNaN(n)?null:n;}
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i];
+    var ts=map.dt>=0?bcParseTs(r[map.dt],null):bcParseTs(map.date>=0?r[map.date]:null,map.time>=0?r[map.time]:null);
+    if(!ts){bad++;continue;}
+    var a=acc[ts];
+    if(!a){a={temp:0,tn:0,rh:0,rhn:0,rain:0,wind:0,wn:0,lwn:0,lwSum:0,lwMaxH:0};acc[ts]=a;order.push(ts);}
+    var v=num(map.temp>=0?r[map.temp]:null);if(v!=null){a.temp+=v;a.tn++;}
+    v=num(map.rh>=0?r[map.rh]:null);if(v!=null){a.rh+=v;a.rhn++;}
+    v=num(map.rain>=0?r[map.rain]:null);if(v!=null)a.rain+=v;
+    v=num(map.wind>=0?r[map.wind]:null);if(v!=null){a.wind+=v;a.wn++;}
+    if(hasLw){v=num(r[map.lw]);if(v!=null){a.lwn++;a.lwSum+=v;if(v>a.lwMaxH)a.lwMaxH=v;if(v>lwMax)lwMax=v;}}
+  }
+  var lwMode=!hasLw?'none':(units.lw&&units.lw!=='auto')?units.lw:(lwMax<=1?'flag':lwMax<=10?'scale':'minutes');
+  order.sort();
+  var out=order.map(function(ts){
+    var a=acc[ts];
+    var temp=a.tn?a.temp/a.tn:null,rh=a.rhn?a.rh/a.rhn:null,wind=a.wn?a.wind/a.wn:null,rain=a.rain;
+    if(units.temp==='C'&&temp!=null)temp=temp*9/5+32;
+    if(units.rain==='mm')rain=rain/25.4;
+    if(units.wind==='kmh'&&wind!=null)wind=wind/1.609344;
+    if(units.wind==='ms'&&wind!=null)wind=wind*2.236936;
+    var lwObs=null;
+    if(lwMode==='flag'&&a.lwn)lwObs=(a.lwSum/a.lwn)>=0.5?10:0;
+    else if(lwMode==='scale'&&a.lwn)lwObs=Math.max(0,Math.min(10,Math.round(a.lwMaxH)));
+    else if(lwMode==='minutes'&&a.lwn)lwObs=Math.min(10,Math.round(a.lwSum/6));
+    var hour=parseInt(ts.slice(11,13),10);
+    return {t:ts,date:ts.slice(0,10),hour:hour,month:parseInt(ts.slice(5,7),10),
+      temp:temp==null?null:Math.round(temp*10)/10,rh:rh==null?null:Math.round(rh),
+      rain:Math.round(rain*1000)/1000,wind:wind==null?null:Math.round(wind*10)/10,
+      lwObs:lwObs,isDay:hour>=7&&hour<=19,stn:true};
+  });
+  return {hours:out,bad:bad,lwMode:lwMode};
+}
+/* station hours OVERRIDE Open-Meteo hour-for-hour; station history from
+   before the Open-Meteo window is prepended (longer real history) */
+function bcMergeHours(om,stn){
+  om=om||[];
+  if(!stn||!stn.length)return om;
+  var by={};
+  stn.forEach(function(h){by[h.t]=h;});
+  var out=om.map(function(h){return by[h.t]||h;});
+  var first=om.length?om[0].t:null;
+  var pre=stn.filter(function(h){return first==null||h.t<first;});
+  pre.sort(function(a,b){return a.t<b.t?-1:1;});
+  return pre.concat(out);
+}
+/* which weather source produced an hour (the merge stamps flags) — and a
+   per-day mix like "NEWA station 20h + Open-Meteo 4h". Pure + tested. */
+function bcSrcName(h){
+  if(!h)return '';
+  return h.newa?'NEWA station':(h.api?'your station':(h.stn?'imported file':'Open-Meteo'));
+}
+function bcDaySrc(d){
+  var c={},order=[];
+  (d&&d.rows||[]).forEach(function(row){
+    var s=bcSrcName(row.h);
+    if(!(s in c)){c[s]=0;order.push(s);}
+    c[s]++;
+  });
+  if(!order.length)return '';
+  if(order.length===1)return order[0];
+  order.sort(function(a,b){return c[b]-c[a];});
+  return order.map(function(k){return k+' '+c[k]+'h';}).join(' + ');
+}
+/* '2025-08-10T14:00' → same clock hour one year LATER (for the last-year
+   overlay's alignment); Feb 29 has no twin → null */
+function bcYearShift(t){
+  t=String(t||'');
+  if(t.length<13)return null;
+  if(t.slice(4,10)==='-02-29')return null;
+  return (parseInt(t.slice(0,4),10)+1)+t.slice(4);
+}
+/* setup share-links: payload ⇄ URL-safe base64 (handles accents/emoji) */
+function bcShareEncode(p){
+  return btoa(unescape(encodeURIComponent(JSON.stringify(p)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function bcShareDecode(s){
+  try{
+    s=String(s||'').replace(/-/g,'+').replace(/_/g,'/');
+    while(s.length%4)s+='=';
+    return JSON.parse(decodeURIComponent(escape(atob(s))));
+  }catch(e){return null;}
+}
+/* ── NEWA (Cornell) station data ────────────────────────────────────────
+   hrly.nrcc.cornell.edu/stnHrly reply → engine hours. Fields observed:
+   date(ISO w/ offset), flags, prcp(in), temp(°F), rhum(%), dwpt, lwet
+   (minutes wet 0–60), wspd(mph), wdir, srad. RH ≤ 0 = missing sensor
+   (verified live 08-10: a station w/o RH reports "0"); "NaN"/"M" → null. */
+function bcNewaHours(reply){
+  if(!reply||!reply.hrlyFields||!reply.hrlyData)return {hours:[],lwet:false};
+  var F={};reply.hrlyFields.forEach(function(f,i){F[f]=i;});
+  function num(v){if(v==null)return null;var n=parseFloat(v);return isFinite(n)?n:null;}
+  var out=[],sawLwet=false,seen={};
+  reply.hrlyData.forEach(function(r){
+    var ds=String((F.date===undefined?null:r[F.date])||'');
+    if(ds.length<13)return;
+    var t=ds.slice(0,13)+':00';
+    if(seen[t])return;               /* DST repeat hour */
+    seen[t]=1;
+    var rh=F.rhum===undefined?null:num(r[F.rhum]);
+    if(rh!=null&&rh<=0)rh=null;
+    var lw=F.lwet===undefined?null:num(r[F.lwet]);
+    var lwObs=lw==null?null:Math.max(0,Math.min(10,Math.round(lw/6)));
+    if(lwObs!=null)sawLwet=true;
+    var rain=F.prcp===undefined?null:num(r[F.prcp]);
+    var hour=parseInt(t.slice(11,13),10);
+    out.push({t:t,date:t.slice(0,10),hour:hour,month:parseInt(t.slice(5,7),10),
+      temp:F.temp===undefined?null:num(r[F.temp]),rh:rh,rain:rain==null?0:rain,
+      wind:F.wspd===undefined?null:num(r[F.wspd]),
+      lwObs:lwObs,isDay:hour>=7&&hour<=19,stn:true,newa:true});
+  });
+  out.sort(function(a,b){return a.t<b.t?-1:1;});
+  return {hours:out,lwet:sawLwet};
+}
+/* ── 📤 Google-Form bridge (spray log → the team's Google Sheet) — same
+   trick as SprayCast: the sheet owner makes a Form once, opens "Get
+   pre-filled link", types a MARKER into each field (date, product, days,
+   frac, location, notes, status, dh), and pastes that link here. Pure. */
+function bcFormParse(url){
+  url=String(url||'').trim();
+  var m=url.match(/https:\/\/docs\.google\.com\/forms\/d\/e\/([\w-]+)\//);
+  if(!m)return {err:'That doesn\'t look like a Google Forms pre-filled link. In your form: ⋮ menu → "Get pre-filled link".'};
+  var fields={};
+  var qs=url.split('?')[1]||'';
+  qs.split('&').forEach(function(kv){
+    var i=kv.indexOf('=');if(i<0)return;
+    var k=decodeURIComponent(kv.slice(0,i)),v='';
+    try{v=decodeURIComponent(kv.slice(i+1).replace(/\+/g,' '));}catch(e){v=kv.slice(i+1);}
+    /* a DATE-type question can't have a marker typed into it — its pre-fill
+       emits entry.N_year/_month/_day instead; detect it by that shape */
+    var dm=k.match(/^(entry\.\d+)_year$/);
+    if(dm){if(!fields.date)fields.date=dm[1];return;}
+    if(!/^entry\.\d+$/.test(k))return;
+    var t=v.toLowerCase();
+    /* word-boundary matches; English + Spanish markers */
+    var slot=/\b(date|day|when|fecha|dia)\b/.test(t)?'date'
+      :/\b(product|producto|spray|chemical|fungicide|name)\b/.test(t)?'name'
+      :/\b(days|protects?|protection|dias)\b/.test(t)?'days'
+      :/\b(frac|group|grupo)\b/.test(t)?'frac'
+      :/\b(location|loc|farm|site|where|lugar|donde|sitio)\b/.test(t)?'loc'
+      :/\b(notes?|comments?|nota|notas|comentarios?)\b/.test(t)?'notes'
+      :/\b(status|state|estado)\b/.test(t)?'status'
+      :/\b(dh|risk|riesgo|degree)\b/.test(t)?'dh':null;
+    if(slot&&!fields[slot])fields[slot]=k;
+  });
+  if(!fields.date||!fields.name)
+    return {err:'Found the form, but not which field is which. Re-open "Get pre-filled link", type the word "date" into the date field and "product" into the product field (plus "days", "frac", "location", "notes", "status", "dh" into any others), copy the link again, and paste that.'};
+  return {formId:m[1],fields:fields};
+}
+function bcFormBody(fields,vals,raw){
+  var parts=[];
+  Object.keys(fields).forEach(function(slot){
+    if(vals[slot]==null)return;
+    parts.push(encodeURIComponent(fields[slot])+'='+encodeURIComponent(String(vals[slot])));
+  });
+  /* a DATE-type question ignores the plain value and wants split parts;
+     Google drops whichever shape the question doesn't use */
+  if(raw&&fields.date&&raw.dateISO){
+    var d=String(raw.dateISO).split('-');
+    if(d.length===3)parts.push(fields.date+'_year='+d[0],fields.date+'_month='+parseInt(d[1],10),fields.date+'_day='+parseInt(d[2],10));
+  }
+  return parts.join('&');
+}
+/* ── LI-COR Cloud (HOBO RX loggers) — the same API the farm's Sensor
+   Dashboard uses; CORS-open with a Bearer token (verified 2026-08-10). ── */
+/* /v2/devices reply → what BlightCast can use per logger: air sensors
+   (a serial reporting BOTH Temperature and RH), the rain stream (the
+   per-interval "Rain" — never "Accumulated Rain"), wind, leaf wetness. */
+function bcLicorScan(devReply){
+  var out=[];
+  if(!devReply||!Array.isArray(devReply.devices))return out;
+  devReply.devices.forEach(function(d){
+    var bySerial={},order=[];
+    (d.sensors||[]).forEach(function(s){
+      var full=String(s.sensorSerialNumber||'');
+      if(!full)return;
+      var bare=full.split('-')[0];
+      if(!bySerial[bare]){bySerial[bare]={serial:bare,types:[]};order.push(bare);}
+      bySerial[bare].types.push({type:String(s.measurementType||''),units:String(s.units||''),full:full});
+    });
+    var air=[],rain=null,wind=null,lw=null;
+    order.forEach(function(k){
+      var e=bySerial[k];
+      var has=function(re){return e.types.some(function(t){return re.test(t.type.toLowerCase());});};
+      if(has(/^temperature$/)&&has(/^rh$/))air.push(k);
+      if(!rain&&has(/^rain$/))rain=k;
+      if(!wind&&has(/^wind speed$/))wind=k;
+      if(!lw&&has(/leaf|wetness/))lw=k;
+    });
+    out.push({device:String(d.deviceSerialNumber||''),name:String(d.deviceName||''),
+      serials:order.map(function(k){return bySerial[k];}),air:air,rain:rain,wind:wind,lw:lw});
+  });
+  return out;
+}
+/* the channel serials to request for a set of picks (one request per
+   channel keeps a 31-day pull ~300 KB instead of the whole logger) */
+function bcLicorChannels(scanDev,picks){
+  var req=[];
+  (scanDev.serials||[]).forEach(function(e){
+    e.types.forEach(function(t){
+      var tl=t.type.toLowerCase();
+      if(e.serial===picks.air&&(tl==='temperature'||tl==='rh'))req.push(t.full);
+      else if(e.serial===picks.rain&&tl==='rain')req.push(t.full);
+      else if(e.serial===picks.wind&&tl==='wind speed')req.push(t.full);
+      else if(picks.lw&&e.serial===picks.lw&&/leaf|wetness/.test(tl))req.push(t.full);
+    });
+  });
+  return req;
+}
+/* /v2/data replies + picks → hourly engine records. Streams are ~5-min
+   [ms,value] pairs; units convert per-stream from the reply's own units
+   (°C→°F, mm→in, km/h·m/s→mph); leaf wetness % → 0–10. offsetSec = the
+   location's UTC offset so hours land on station-local clock time. */
+function bcLicorHours(replies,picks,offsetSec){
+  var acc={},sawLw=false;
+  function toHour(ms){
+    var d=new Date(ms+(offsetSec||0)*1000);
+    return d.getUTCFullYear()+'-'+('0'+(d.getUTCMonth()+1)).slice(-2)+'-'+('0'+d.getUTCDate()).slice(-2)+'T'+('0'+d.getUTCHours()).slice(-2)+':00';
+  }
+  (Array.isArray(replies)?replies:[replies]).forEach(function(rep){
+    if(!rep||!Array.isArray(rep.sensors))return;
+    rep.sensors.forEach(function(s){
+      var bare=String(s.sensorSerialNumber||'').split('-')[0];
+      (s.data||[]).forEach(function(m){
+        var type=String(m.measurementType||'').toLowerCase(),units=String(m.units||'').toLowerCase();
+        var kind=null;
+        if(bare===picks.air&&type==='temperature')kind='temp';
+        else if(bare===picks.air&&type==='rh')kind='rh';
+        else if(bare===picks.rain&&type==='rain')kind='rain';
+        else if(bare===picks.wind&&type==='wind speed')kind='wind';
+        else if(picks.lw&&bare===picks.lw&&/leaf|wetness/.test(type))kind='lw';
+        if(!kind)return;
+        (m.records||[]).forEach(function(rec){
+          if(!Array.isArray(rec)||rec.length<2||rec[1]==null)return;
+          var v=+rec[1];if(!isFinite(v))return;
+          if(kind==='temp'&&units.indexOf('c')>=0&&units.indexOf('f')<0)v=v*9/5+32;
+          if(kind==='rain'&&units.indexOf('mm')>=0)v=v/25.4;
+          if(kind==='wind'){if(units.indexOf('km')>=0)v=v/1.609344;else if(/m\/s|mps/.test(units))v=v*2.236936;}
+          var t=toHour(rec[0]);
+          var a=acc[t];if(!a){a={tS:0,tN:0,rS:0,rN:0,rain:0,wS:0,wN:0,lwS:0,lwN:0};acc[t]=a;}
+          if(kind==='temp'){a.tS+=v;a.tN++;}
+          else if(kind==='rh'){a.rS+=v;a.rN++;}
+          else if(kind==='rain')a.rain+=v;
+          else if(kind==='wind'){a.wS+=v;a.wN++;}
+          else{a.lwS+=v;a.lwN++;sawLw=true;}
+        });
+      });
+    });
+  });
+  var out=Object.keys(acc).sort().map(function(t){
+    var a=acc[t],hour=parseInt(t.slice(11,13),10);
+    return {t:t,date:t.slice(0,10),hour:hour,month:parseInt(t.slice(5,7),10),
+      temp:a.tN?Math.round(a.tS/a.tN*10)/10:null,
+      rh:a.rN?Math.round(a.rS/a.rN):null,
+      rain:Math.round(a.rain*1000)/1000,
+      wind:a.wN?Math.round(a.wS/a.wN*10)/10:null,
+      lwObs:a.lwN?Math.max(0,Math.min(10,Math.round((a.lwS/a.lwN)/10))):null,
+      isDay:hour>=7&&hour<=19,stn:true,api:true};
+  }).filter(function(h){return h.temp!=null||h.rain>0;});
+  return {hours:out,lwet:sawLw};
+}
+/* a JSON feed (array of reading objects, possibly nested one level) → the
+   same header-row grid the CSV column mapper reads */
+function bcJsonRows(data){
+  var arr=null;
+  if(Array.isArray(data))arr=data;
+  else if(data&&typeof data==='object'){
+    for(var k in data){
+      if(Array.isArray(data[k])&&data[k].length&&typeof data[k][0]==='object'&&data[k][0]!==null){arr=data[k];break;}
+    }
+  }
+  if(!arr||!arr.length||typeof arr[0]!=='object'||arr[0]===null)return null;
+  var cols=[],seen={};
+  arr.forEach(function(o){for(var k2 in o){if(!seen[k2]){seen[k2]=1;cols.push(k2);}}});
+  if(!cols.length)return null;
+  var rows=[cols];
+  arr.forEach(function(o){
+    rows.push(cols.map(function(c){var v=o[c];return v==null?'':(typeof v==='object'?JSON.stringify(v):String(v));}));
+  });
+  return rows;
+}
+/* nearest stations by great-circle distance (miles) */
+function bcNearest(stations,lat,lon,n){
+  function dist(a){
+    var R=3958.8,dLa=(a.lat-lat)*Math.PI/180,dLo=(a.lon-lon)*Math.PI/180;
+    var s1=Math.sin(dLa/2),s2=Math.sin(dLo/2);
+    var h=s1*s1+Math.cos(lat*Math.PI/180)*Math.cos(a.lat*Math.PI/180)*s2*s2;
+    return 2*R*Math.asin(Math.sqrt(h));
+  }
+  return (stations||[])
+    .filter(function(s){return s&&typeof s.lat==='number'&&typeof s.lon==='number'&&s.id&&s.network;})
+    .map(function(s){return {s:s,mi:dist(s)};})
+    .sort(function(a,b){return a.mi-b.mi;})
+    .slice(0,n||8);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   State
+   ════════════════════════════════════════════════════════════════════════ */
+var locs=bcLoadK(BCK.locs,[]);
+var state=bcLoadK(BCK.state,{activeLoc:null,threshold:56,rhWet:90,lwWet:1,chartDays:7});
+if(state.bell==null)state.bell=false;
+if(state.lastYear==null)state.lastYear=false;
+if(!state.alertSigs)state.alertSigs={};
+var sprays=bcLoadK(BCK.sprays,[]);
+var prods=bcLoadK(BCK.prods,[]);
+var wxData=null,hoursCache=[],runCache=[],daysCache=[],nowIdxCache=0,nowTCache='',_sprayByCache=null,_wxNoteBase='';
+var selDay=null;   /* the selected day's DATE STRING — indexes shift when imported station history prepends days */
+/* boxwood susceptibility choices per location (guidance only — the chart
+   bands stay the model's published levels) */
+var BC_SUSC={
+  high:{label:'English / dwarf (highly susceptible)',firstAt:56},
+  susc:{label:'American (susceptible)',firstAt:160},
+  tol:{label:'Resistant hybrid (tolerant)',firstAt:250}
+};
+function locSuscOf(l){return (l&&BC_SUSC[l.susc])?l.susc:'high';}
+/* 🔔 alert level is PER LOCATION (l.thr), falling back to the shared
+   default in state.threshold — an English hedge and a tolerant-hybrid
+   block deserve different lines (2026-08-10, Caryn ask) */
+function thrForId(id){
+  var l=locs.find(function(x){return x.id===id;});
+  var n=l?parseInt(l.thr,10):NaN;
+  return (isFinite(n)&&n>0)?n:state.threshold;
+}
+function curThr(){return state.activeLoc?thrForId(state.activeLoc):state.threshold;}
+function activeLoc(){return locs.find(function(l){return l.id===state.activeLoc;})||locs[0]||null;}
+function locName(id){var l=locs.find(function(x){return x.id===id;});return l?l.name:'?';}
+function localISO(d){d=d||new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Tabs + modals
+   ════════════════════════════════════════════════════════════════════════ */
+var TABS=['risk','model','setup'];
+function bcNav(tab){
+  TABS.forEach(function(t){
+    document.getElementById('page-'+t).style.display=(t===tab)?'':'none';
+    document.getElementById('tab-'+t).classList.toggle('on',t===tab);
+  });
+  if(tab==='setup'){locRenderList();stnRender();newaRender();apiRender();setRender();prodRenderList();bellRender();bcSheetRender();backRender();}
+  if(tab==='model')renderBandTable();
+}
+function mOpen(id){document.getElementById(id).classList.add('op');}
+function mClose(id){document.getElementById(id).classList.remove('op');}
+document.querySelectorAll('.mbg').forEach(function(m){m.addEventListener('click',function(e){if(e.target===m)m.classList.remove('op');});});
+
+/* ════════════════════════════════════════════════════════════════════════
+   Locations — Open-Meteo geocoding (free, no key)
+   ════════════════════════════════════════════════════════════════════════ */
+function locSearch(){
+  var q=document.getElementById('loc-q').value.trim();if(!q)return;
+  document.getElementById('loc-results').innerHTML='<div class="li">Searching…</div>';
+  var pq=bcParseQuery(q);
+  _locFetch(pq.name,function(res){
+    if(res&&res.length){_locRender(bcFilterResults(res,pq.state));return;}
+    if(res&&pq.name.indexOf(' ')>0){
+      _locFetch(pq.name.split(' ').slice(0,-1).join(' '),function(res2){
+        _locRender(res2==null?null:bcFilterResults(res2,pq.state));});
+      return;
+    }
+    _locRender(res);
+  });
+}
+function _locFetch(name,cb){
+  fetch('https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&format=json&name='+encodeURIComponent(name))
+    .then(function(r){return r.json();})
+    .then(function(d){cb((d&&d.results)||[]);})
+    .catch(function(){cb(null);});
+}
+function _locRender(res){
+  var box=document.getElementById('loc-results');
+  if(res==null){box.innerHTML='<div class="li">Search failed — check your internet connection.</div>';box._res=[];return;}
+  box.innerHTML=res.length?res.map(function(r,i){
+    var nm=[r.name,r.admin1,r.country_code].filter(Boolean).join(', ');
+    return '<div class="li"><div class="grow">'+esc(nm)+'<small>'+r.latitude.toFixed(3)+', '+r.longitude.toFixed(3)+'</small></div>'
+      +'<button class="btn pri" onclick="locAdd('+i+')">＋ Save</button></div>';
+  }).join(''):'<div class="li">No matches — try just the town name (or the nearest bigger town).</div>';
+  box._res=res;
+}
+function locAdd(i){
+  var r=document.getElementById('loc-results')._res[i];if(!r)return;
+  var l={id:'l_'+Date.now().toString(36),name:[r.name,r.admin1].filter(Boolean).join(', '),lat:r.latitude,lon:r.longitude};
+  locs.push(l);state.activeLoc=l.id;
+  bcSaveK(BCK.locs,locs);bcSaveK(BCK.state,state);
+  locRenderList();wxData=null;renderAll();toast('Location saved — fetching a month of weather');
+}
+function locUse(id){state.activeLoc=id;bcSaveK(BCK.state,state);locRenderList();wxData=null;renderAll();}
+function locDel(id){
+  locs=locs.filter(function(l){return l.id!==id;});
+  if(state.activeLoc===id)state.activeLoc=locs[0]?locs[0].id:null;
+  if(state.alertSigs)delete state.alertSigs[id];
+  ['blightcast_wx_','blightcast_stn_','blightcast_ly_','blightcast_newa_','blightcast_api_'].forEach(function(p){
+    try{localStorage.removeItem(p+id);}catch(e){}
+  });
+  bcSaveK(BCK.locs,locs);bcSaveK(BCK.state,state);locRenderList();stnRender();newaRender();apiRender();wxData=null;renderAll();
+}
+function locSusc(id,v){
+  var l=locs.find(function(x){return x.id===id;});if(!l)return;
+  l.susc=BC_SUSC[v]?v:'high';
+  bcSaveK(BCK.locs,locs);renderRisk();
+  toast('🌱 '+l.name+' set to '+BC_SUSC[locSuscOf(l)].label);
+}
+function locRename(id){
+  var l=locs.find(function(x){return x.id===id;});if(!l)return;
+  var nm=prompt('Name or nickname for this location:',l.name);
+  if(nm==null)return;nm=nm.trim();if(!nm)return;
+  l.name=nm;bcSaveK(BCK.locs,locs);locRenderList();renderAll();
+}
+function locRenderList(){
+  var box=document.getElementById('loc-list');
+  box.innerHTML=locs.length?locs.map(function(l){
+    var on=activeLoc()&&activeLoc().id===l.id,su=locSuscOf(l);
+    var sel='<select class="sbtn" style="cursor:pointer;max-width:200px;" onchange="locSusc(\''+l.id+'\',this.value)" title="What grows at this location — tailors the guidance lines">'
+      +Object.keys(BC_SUSC).map(function(k){
+        return '<option value="'+k+'"'+(su===k?' selected':'')+'>🌱 '+esc(BC_SUSC[k].label)+'</option>';
+      }).join('')+'</select>';
+    return '<div class="li"><div class="grow">'+(on?'📍 <b>':'')+esc(l.name)+(on?'</b> — active':'')+'<small>'+l.lat.toFixed(3)+', '+l.lon.toFixed(3)+'</small></div>'
+      +sel
+      +'<button class="btn" onclick="locRename(\''+l.id+'\')" title="Rename / nickname">✎</button>'
+      +(on?'':'<button class="btn" onclick="locUse(\''+l.id+'\')">Use</button>')
+      +'<button class="btn warn" onclick="locDel(\''+l.id+'\')">✕</button></div>';
+  }).join(''):'<div class="li">None yet — search above.</div>';
+}
+function renderLocChips(){
+  var box=document.getElementById('loc-chips');
+  box.innerHTML=locs.map(function(l){
+    return '<button class="locchip'+(activeLoc()&&activeLoc().id===l.id?' on':'')+'" onclick="locUse(\''+l.id+'\')">📍 '+esc(l.name)+'</button>';
+  }).join('')+'<button class="locchip" style="border-style:dashed;color:var(--txt2);" onclick="bcNav(\'setup\')">＋</button>';
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Settings (threshold + wetness sensitivity)
+   ════════════════════════════════════════════════════════════════════════ */
+function renderThr(){
+  var sel=document.getElementById('thr-sel');
+  var cur=curThr();
+  var opts=BC_BANDS.slice(1).map(function(b){
+    return '<option value="'+b.at+'"'+(cur===b.at?' selected':'')+'>🔔 Alert at '+b.at+' DH — '+esc(b.name)+'</option>';
+  });
+  var custom=BC_BANDS.slice(1).every(function(b){return b.at!==cur;});
+  if(custom)opts.push('<option value="'+cur+'" selected>🔔 Alert at '+cur+' DH — custom</option>');
+  opts.push('<option value="custom">✎ Custom level…</option>');
+  sel.innerHTML=opts.join('');
+  sel.title='Your alert level FOR THIS LOCATION — each location remembers its own (new locations start at the shared default)';
+}
+function thrChange(v){
+  var n;
+  if(v==='custom'){
+    var raw=prompt('Alert when accumulated risk reaches (DH):',curThr());
+    if(raw==null){renderThr();return;}
+    n=parseInt(raw,10);
+    if(!(n>0)){renderThr();return;}
+  } else n=parseInt(v,10)||56;
+  var l=activeLoc();
+  if(l){l.thr=n;bcSaveK(BCK.locs,locs);toast('🔔 '+l.name+' alerts at '+n+' DH');}
+  else{state.threshold=n;bcSaveK(BCK.state,state);}
+  renderThr();renderRisk();renderCompare();
+}
+function rangeChange(v){state.chartDays=parseInt(v,10)||7;bcSaveK(BCK.state,state);renderChart();}
+function setRender(){
+  document.getElementById('set-rh').value=state.rhWet;
+  document.getElementById('set-lw').value=state.lwWet;
+}
+function setChange(){
+  state.rhWet=Math.min(99,Math.max(80,parseInt(document.getElementById('set-rh').value,10)||90));
+  state.lwWet=Math.min(10,Math.max(1,parseInt(document.getElementById('set-lw').value,10)||1));
+  bcSaveK(BCK.state,state);setRender();rebuild();toast('Sensitivity updated — risk recalculated');
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Product presets + spray log
+   ════════════════════════════════════════════════════════════════════════ */
+var _prodEditing=null;
+function prodRenderList(){
+  var box=document.getElementById('prod-list');if(!box)return;
+  box.innerHTML=prods.length?prods.map(function(p){
+    return '<div class="li"><div class="grow"><b>'+esc(p.name)+'</b><small>protects '+p.days+' days'+(p.wash?' · washes off at '+p.wash+'″ rain':'')+(p.frac?' · FRAC '+esc(p.frac):'')+'</small></div>'
+      +'<button class="btn" onclick="prodEdit(\''+p.id+'\')">✎</button>'
+      +'<button class="btn warn" onclick="prodDel(\''+p.id+'\')">✕</button></div>';
+  }).join(''):'<div class="li" style="border:none;color:var(--txt2);">None yet — ＋ New product, or tick "save as a preset" while logging a spray.</div>';
+}
+function prodEdit(id){
+  _prodEditing=id?prods.find(function(p){return p.id===id;}):null;
+  document.getElementById('prod-form').style.display='block';
+  document.getElementById('pr-name').value=_prodEditing?_prodEditing.name:'';
+  document.getElementById('pr-days').value=_prodEditing?_prodEditing.days:7;
+  document.getElementById('pr-frac').value=_prodEditing&&_prodEditing.frac?_prodEditing.frac:'';
+  document.getElementById('pr-wash').value=_prodEditing&&_prodEditing.wash?_prodEditing.wash:'';
+  document.getElementById('pr-name').focus();
+}
+function prodSave(){
+  var name=document.getElementById('pr-name').value.trim();
+  if(!name){alert('Name the product.');return;}
+  var p=_prodEditing||{id:'pr_'+Date.now().toString(36)};
+  p.name=name;
+  p.days=Math.min(30,Math.max(1,parseInt(document.getElementById('pr-days').value,10)||7));
+  p.frac=document.getElementById('pr-frac').value.trim();
+  var _w=parseFloat(document.getElementById('pr-wash').value);
+  p.wash=(_w>0)?Math.round(_w*10)/10:null;
+  if(!_prodEditing)prods.push(p);
+  bcSaveK(BCK.prods,prods);
+  document.getElementById('prod-form').style.display='none';
+  _prodEditing=null;
+  prodRenderList();toast('Product saved');
+}
+function prodDel(id){
+  var p=prods.find(function(x){return x.id===id;});
+  if(p&&!confirm('Remove the product "'+p.name+'"? (Logged sprays keep their info.)'))return;
+  prods=prods.filter(function(x){return x.id!==id;});
+  bcSaveK(BCK.prods,prods);prodRenderList();
+}
+/* upsert by name (case-insensitive) — used by the "save as preset" tickbox */
+function prodUpsert(name,days,frac,wash){
+  var low=name.toLowerCase();
+  var p=prods.find(function(x){return x.name.toLowerCase()===low;});
+  if(p){p.days=days;if(frac)p.frac=frac;if(wash>0)p.wash=wash;}
+  else prods.push({id:'pr_'+Date.now().toString(36),name:name,days:days,frac:frac||'',wash:(wash>0)?wash:null});
+  bcSaveK(BCK.prods,prods);
+}
+function sprayFormOpen(){
+  if(!activeLoc()){toast('Add a 📍 location first (⚙ Setup)');bcNav('setup');return;}
+  var sel=document.getElementById('sf-preset');
+  document.getElementById('sf-preset-row').style.display=prods.length?'':'none';
+  sel.innerHTML='<option value="">— or type it in below —</option>'+prods.map(function(p){
+    return '<option value="'+p.id+'">🧴 '+esc(p.name)+' ('+p.days+' days'+(p.frac?', FRAC '+esc(p.frac):'')+')</option>';
+  }).join('');
+  document.getElementById('sf-date').value=localISO();
+  document.getElementById('sf-name').value='';
+  document.getElementById('sf-days').value=7;
+  document.getElementById('sf-frac').value='';
+  document.getElementById('sf-wash').value='';
+  document.getElementById('sf-save').checked=false;
+  mOpen('m-spray');
+  (prods.length?sel:document.getElementById('sf-name')).focus();
+}
+function sfPreset(){
+  var p=prods.find(function(x){return x.id===document.getElementById('sf-preset').value;});
+  if(!p)return;
+  document.getElementById('sf-name').value=p.name;
+  document.getElementById('sf-days').value=p.days;
+  document.getElementById('sf-frac').value=p.frac||'';
+  document.getElementById('sf-wash').value=p.wash||'';
+  document.getElementById('sf-save').checked=false;
+}
+function spraySave(){
+  var date=document.getElementById('sf-date').value;
+  if(!date){alert('Pick the date it was applied.');return;}
+  var name=document.getElementById('sf-name').value.trim();
+  var days=Math.min(30,Math.max(1,parseInt(document.getElementById('sf-days').value,10)||7));
+  var frac=document.getElementById('sf-frac').value.trim();
+  var _wv=parseFloat(document.getElementById('sf-wash').value);
+  var wash=(_wv>0)?Math.round(_wv*10)/10:null;
+  /* rotation nudge — warning only, never blocks */
+  if(frac){
+    var lastF=bcLastFrac(sprays,state.activeLoc);
+    if(lastF&&lastF===frac.toUpperCase()&&!confirm('Heads up: your last logged spray here was also FRAC '+lastF+'. Rotating chemistry helps prevent resistance. Log it anyway?'))return;
+  }
+  /* DH standing when it went on (when the date is inside the loaded window) */
+  var at=bcDHatDate(hoursCache,runCache,date);
+  var _newSpray={id:'s_'+Date.now().toString(36),locId:state.activeLoc,date:date,name:name,days:days,frac:frac,wash:wash,
+    dhAt:at?at.cum:null,bandAt:at?bcBand(at.cum).name:null,created:Date.now()};
+  sprays.push(_newSpray);
+  bcSaveK(BCK.sprays,sprays);
+  bcSheetSend(_newSpray,'applied');
+  if(document.getElementById('sf-save').checked&&name)prodUpsert(name,days,frac,wash);
+  mClose('m-spray');renderRisk();toast('Spray logged'+(document.getElementById('sf-save').checked&&name?' — preset saved':''));
+}
+function sprayDel(id){
+  var s=sprays.find(function(x){return x.id===id;});
+  if(s&&!confirm('Remove this spray entry?'))return;
+  if(s)bcSheetSend(s,'removed');
+  sprays=sprays.filter(function(x){return x.id!==id;});
+  bcSaveK(BCK.sprays,sprays);renderRisk();
+}
+/* one spray's EFFECTIVE end: label days, cut earlier by rain wash-off */
+function _sprayEff(s){
+  var d=new Date(s.date+'T12:00:00');d.setDate(d.getDate()+(parseInt(s.days,10)||0));
+  var end=localISO(d),washed=false;
+  if(s.wash&&hoursCache.length){
+    var wd=bcWashoutDate(hoursCache,s.date,s.wash);
+    if(wd){
+      var wd2=new Date(wd+'T12:00:00');wd2.setDate(wd2.getDate()-1);
+      var wISO=localISO(wd2);
+      if(wISO<end){end=wISO;washed=true;}
+    }
+  }
+  return {end:end,washed:washed};
+}
+function renderSprays(){
+  var box=document.getElementById('spray-list');
+  var mine=sprays.filter(function(s){return !s.locId||s.locId===state.activeLoc;})
+    .sort(function(a,b){return a.date<b.date?1:-1;});
+  box.innerHTML=mine.length?mine.map(function(s){
+    var eff=_sprayEff(s),active=eff.end>=localISO();
+    var washLine='';
+    if(s.wash){
+      var soFar=bcRainSince(hoursCache,s.date,nowTCache);
+      washLine=' · wash-off at '+s.wash+'″ (rain since: '+soFar+'″)'+(eff.washed?' <b style="color:var(--bad);">— washed off</b>':'');
+    }
+    return '<div class="li"'+(active?'':' style="opacity:.6;"')+'><div class="grow"><b>🧴 '+esc(s.name||'Protective spray')+'</b>'
+      +'<small>'+new Date(s.date+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})
+      +' · protects '+s.days+' days → '+new Date(eff.end+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})
+      +(s.frac?' · FRAC '+esc(s.frac):'')
+      +(s.dhAt!=null?' · went on at '+fmtDH(s.dhAt)+' DH ('+esc(s.bandAt||'')+')':'')
+      +washLine
+      +(active?' · <b style="color:var(--acc);">active</b>':' · lapsed')+'</small></div>'
+      +'<button class="sbtn warn" onclick="sprayDel(\''+s.id+'\')">✕</button></div>';
+  }).join(''):'<div class="li" style="border:none;color:var(--txt2);">Nothing logged yet.</div>';
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Weather — Open-Meteo hourly: 31 past days + 7-day forecast, cached 30 min
+   ════════════════════════════════════════════════════════════════════════ */
+var WXICON={0:'☀️',1:'🌤',2:'⛅',3:'☁️',45:'🌫',48:'🌫',51:'🌦',53:'🌦',55:'🌧',61:'🌦',63:'🌧',65:'🌧',66:'🌧',67:'🌧',71:'🌨',73:'🌨',75:'❄️',77:'🌨',80:'🌦',81:'🌧',82:'⛈',85:'🌨',86:'❄️',95:'⛈',96:'⛈',99:'⛈'};
+function wxFetch(cb){wxFetchLoc(activeLoc(),cb);}
+function wxFetchLoc(l,cb){
+  if(!l){cb(null);return;}
+  var mk='blightcast_wx_'+l.id;
+  try{var c=JSON.parse(localStorage.getItem(mk)||'null');
+    if(c&&c.at&&(Date.now()-c.at)<30*60000){cb(c.d,c.at);return;}}catch(e){}
+  fetch('https://api.open-meteo.com/v1/forecast?latitude='+l.lat+'&longitude='+l.lon
+    +'&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,precipitation,wind_speed_10m,is_day'
+    +'&daily=weather_code,temperature_2m_max,temperature_2m_min'
+    +'&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch'
+    +'&past_days=31&forecast_days=7&timezone=auto')
+    .then(function(r){return r.json();})
+    .then(function(d){try{localStorage.setItem(mk,JSON.stringify({d:d,at:Date.now()}));}catch(e){}cb(d,Date.now());})
+    .catch(function(){ /* stale cache beats nothing */
+      try{var c2=JSON.parse(localStorage.getItem(mk)||'null');if(c2&&c2.d){cb(c2.d,c2.at);return;}}catch(e2){}
+      cb(null);});
+}
+/* imported station data: stored compact per location, expanded on load */
+function stnLoad(locId){return locId?bcLoadK('blightcast_stn_'+locId,null):null;}
+function stnExpand(blob){
+  if(!blob||!blob.hours)return[];
+  return blob.hours.map(function(a){
+    var t=a[0],hour=parseInt(t.slice(11,13),10);
+    return {t:t,date:t.slice(0,10),hour:hour,month:parseInt(t.slice(5,7),10),
+      temp:a[1],rh:a[2],rain:a[3]||0,wind:a[4],lwObs:a[5],isDay:hour>=7&&hour<=19,stn:true};
+  });
+}
+/* save (merging with what's already stored — re-imports EXTEND) + 92-day cap */
+function stnSave(locId,res,fname){
+  var old=stnLoad(locId),by={};
+  if(old&&old.hours)old.hours.forEach(function(a){by[a[0]]=a;});
+  /* one bogus far-future row (a footer like "12/31/99" parses as 2099)
+     would anchor the rolling cap there and purge the WHOLE history —
+     drop anything more than 2 days ahead of the real clock (08-10 review) */
+  var maxD=new Date();maxD.setDate(maxD.getDate()+2);
+  var maxISO=maxD.getFullYear()+'-'+('0'+(maxD.getMonth()+1)).slice(-2)+'-'+('0'+maxD.getDate()).slice(-2);
+  res.hours.forEach(function(h){if(h.date<=maxISO)by[h.t]=[h.t,h.temp,h.rh,h.rain,h.wind,h.lwObs];});
+  var keys=Object.keys(by).sort();
+  if(keys.length){
+    var newest=keys[keys.length-1];
+    var cut=new Date(newest.slice(0,10)+'T00:00:00');cut.setDate(cut.getDate()-92);
+    var cutISO=cut.getFullYear()+'-'+('0'+(cut.getMonth()+1)).slice(-2)+'-'+('0'+cut.getDate()).slice(-2);
+    keys=keys.filter(function(k){return k.slice(0,10)>=cutISO;});
+  }
+  return bcSaveK('blightcast_stn_'+locId,{fname:fname||'',at:Date.now(),lwMode:res.lwMode,
+    hours:keys.map(function(k){return by[k];})});
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Render
+   ════════════════════════════════════════════════════════════════════════ */
+function fmtDH(n){return n>=100?String(Math.round(n)):String(Math.round(n*10)/10);}
+function dayShort(date){return new Date(date+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'numeric',day:'numeric'});}
+function tLabel(t){var d=new Date(t+':00');return d.toLocaleDateString([],{weekday:'short',month:'numeric',day:'numeric'})+' '+bcFmtHour(parseInt(t.slice(11,13),10));}
+
+function rebuild(){
+  if(!wxData){renderRisk();return;}
+  /* precedence: your own CSV > 🔌 your API > 🛰 NEWA > Open-Meteo */
+  var newa=(_newaCache&&_newaCache.locId===state.activeLoc)?_newaCache.hours:[];
+  var api=(_apiCache&&_apiCache.locId===state.activeLoc)?_apiCache.hours:[];
+  var stn=stnExpand(stnLoad(state.activeLoc));
+  hoursCache=bcMergeHours(bcMergeHours(bcMergeHours(bcHours(wxData),newa),api),stn);
+  runCache=bcRun(hoursCache,{rhWet:state.rhWet,lwWet:state.lwWet});
+  nowTCache=new Date(Date.now()+((wxData.utc_offset_seconds||0)*1000)).toISOString().slice(0,13)+':00';
+  nowIdxCache=bcNowIdx(hoursCache,nowTCache);
+  daysCache=bcDaysBuild(hoursCache,runCache,wxData.daily);
+  /* rebuild the whole note from the stored base — appending to the live
+     textContent duplicated the suffixes on every settings rebuild */
+  var note=document.getElementById('wx-note'),noteTxt=_wxNoteBase||note.textContent||'';
+  if(newa.length)noteTxt+=' · 🛰 '+((activeLoc()&&activeLoc().newa)?activeLoc().newa.name:'station');
+  if(api.length)noteTxt+=' · 🔌 '+((activeLoc()&&activeLoc().api&&activeLoc().api.name)||'your station');
+  if(stn.length)noteTxt+=' · 📡 your data through '+stn[stn.length-1].date;
+  note.textContent=noteTxt;
+  renderRisk();
+  alertCheck();
+  if(state.lastYear)lyEnsure(function(){renderChart();});
+}
+function renderAll(){
+  renderLocChips();renderThr();renderCompare();
+  if(!activeLoc()){wxData=null;hoursCache=[];runCache=[];daysCache=[];renderRisk();
+    document.getElementById('wx-note').textContent='';return;}
+  document.getElementById('wx-note').textContent='fetching weather…';
+  var l=activeLoc();
+  wxFetch(function(d,at){
+    /* the user may have switched locations while this reply was in flight —
+       a stale reply must never repaint the active location (08-10 review) */
+    if(!activeLoc()||activeLoc().id!==l.id)return;
+    wxData=d;
+    _wxNoteBase=d?('weather '+(at?new Date(at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'')+' · '+l.name):'⚠ weather fetch failed';
+    document.getElementById('wx-note').textContent=_wxNoteBase;
+    newaFetchLoc(l,d?d.utc_offset_seconds:null,function(nh){
+      apiFetchLoc(l,d?d.utc_offset_seconds:null,function(ah){
+        if(!activeLoc()||activeLoc().id!==l.id)return;
+        _newaCache={locId:l.id,hours:nh};
+        _apiCache={locId:l.id,hours:ah};
+        rebuild();
+      });
+    });
+  });
+}
+/* ── all-locations compare strip (shown when there's more than one) ── */
+function renderCompare(){
+  var p=document.getElementById('cmp-panel');if(!p)return;
+  if(locs.length<2){p.style.display='none';return;}
+  p.style.display='';
+  var box=document.getElementById('cmp-chips');
+  box.innerHTML=locs.map(function(l){
+    return '<button class="cmpchip'+(state.activeLoc===l.id?' on':'')+'" id="cmp-'+l.id+'" onclick="locUse(\''+l.id+'\')">📍 '+esc(l.name)+'<span class="note">…</span></button>';
+  }).join('');
+  locs.forEach(function(l){
+    wxFetchLoc(l,function(d){
+      var el=document.getElementById('cmp-'+l.id);
+      if(!el)return;
+      if(!d){el.innerHTML='📍 '+esc(l.name)+'<span class="note">⚠ no weather</span>';return;}
+      newaFetchLoc(l,d.utc_offset_seconds,function(nh){
+      apiFetchLoc(l,d.utc_offset_seconds,function(ah){
+      var hrs=bcMergeHours(bcMergeHours(bcMergeHours(bcHours(d),nh),ah),stnExpand(stnLoad(l.id)));
+      var run=bcRun(hrs,{rhWet:state.rhWet,lwWet:state.lwWet});
+      if(!run.length){el.innerHTML='📍 '+esc(l.name)+'<span class="note">⚠ no weather</span>';return;}
+      var nowT=new Date(Date.now()+((d.utc_offset_seconds||0)*1000)).toISOString().slice(0,13)+':00';
+      var ni=bcNowIdx(hrs,nowT);
+      var i=Math.max(0,Math.min(ni-1,run.length-1));
+      var cum=run[i].cum,band=bcBand(cum);
+      var lthr=thrForId(l.id);
+      var x=bcCrossing(run,lthr,ni);
+      var fut=cum>=lthr
+        ?'<span class="note" style="color:var(--bad);font-weight:700;">⚠ above its alert level ('+lthr+')</span>'
+        :(x>=0?'<span class="note" style="color:var(--bad);font-weight:700;">🔔 crosses '+lthr+' DH '+esc(dayShort(run[x].t.slice(0,10)))+'</span>'
+              :'<span class="note" style="color:var(--acc);font-weight:700;">✓ below its alert level ('+lthr+')</span>');
+      el.innerHTML='📍 '+esc(l.name)
+        +'<span class="cdh"><span class="chip" style="background:'+band.bg+';color:'+band.txt+';border-color:'+band.bd+';">'+fmtDH(cum)+' DH</span>'
+        +'<span style="font-size:11px;color:'+band.txt+';">'+esc(band.name)+'</span></span>'
+        +fut;
+      if(l.id!==state.activeLoc)alertCheckRun(run,ni,l.id); /* active loc chimes via rebuild() */
+      });
+      });
+    });
+  });
+}
+function renderRisk(){
+  var has=!!(activeLoc()&&runCache.length);
+  ['st-panel','chart-panel','days','spray-panel'].forEach(function(id){document.getElementById(id).style.display=has?'':'none';});
+  document.getElementById('empty-hint').style.display=has?'none':'';
+  document.getElementById('detail').style.display='none';
+  if(!has)return;
+  renderStatus();renderChart();renderDays();renderSprays();
+  if(selDay!=null){
+    var _si=-1;
+    for(var _q=0;_q<daysCache.length;_q++)if(daysCache[_q].date===selDay){_si=_q;break;}
+    if(_si>=0)renderDetail(_si);else selDay=null;
+  }
+}
+function renderStatus(){
+  var i=Math.max(0,Math.min(nowIdxCache-1,runCache.length-1));
+  var r=runCache[i],cum=r.cum,band=bcBand(cum);
+  document.getElementById('st-num').innerHTML=fmtDH(cum)+'<small>infection degree-hours (DH) now</small>';
+  var bc=document.getElementById('st-band');
+  bc.textContent=band.name;
+  bc.style.background=band.bg;bc.style.color=band.txt;bc.style.borderColor=band.bd;
+  bc.title=band.sub;
+  var lines=[];
+  /* wet / dry right now */
+  if(r.wet)lines.push('<span>💧 Leaves estimated <b>wet</b> right now (wetness '+r.lw+'/10) — risk is accruing'+(r.add?' at '+fmtDH(r.add)+' DH/hr':'')+'.</span>');
+  else lines.push('<span>☀ Leaves estimated dry — '+r.dry+' dry hour'+(r.dry===1?'':'s')+' so far'+(r.dry>=6?' (accumulation is reset)':' (resets at 6)')+'.</span>');
+  /* re-spray planner: protection windows + the forecast, combined */
+  var thr=curThr();
+  var prot=bcProtectedUntil(sprays,state.activeLoc,localISO(),hoursCache);
+  _sprayByCache=bcSprayBy(runCache,hoursCache,nowIdxCache,thr,prot?prot.end:null,localISO());
+  var icsBtn=' <button class="sbtn" style="border-color:var(--blue);color:var(--blue);" onclick="icsSprayBy()" title="Download a calendar reminder (12-hour and 1-hour alarms built in)">📅 Remind me</button>';
+  var fmtD=function(iso){return new Date(iso+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});};
+  if(prot){
+    lines.push('<span class="okk">🧴 Protected until <b>'+fmtD(prot.end)+'</b>'+(prot.name?' ('+esc(prot.name)+')':'')
+      +(prot.washed?' — <b style="color:var(--bad);">cut short by rain wash-off</b>, per your spray log.':' — per your spray log.')+'</span>');
+    if(_sprayByCache)lines.push('<span class="warn">🔔 Risk is above your alert level ('+thr+' DH) after protection lapses — <b>re-cover by '+fmtD(_sprayByCache.dateISO)+'</b>.'+icsBtn+'</span>');
+    else lines.push('<span class="okk">✓ Forecast stays below your alert level ('+thr+' DH) after protection lapses.</span>');
+  } else if(cum>=thr){
+    lines.push('<span class="warn">⚠ Already above your alert level ('+thr+' DH) and unprotected. '+esc(band.sub)+'.'+icsBtn+'</span>');
+  } else if(_sprayByCache){
+    lines.push('<span class="warn">🔔 Forecast crosses your alert level ('+thr+' DH) around <b>'+tLabel(runCache[_sprayByCache.idx].t)+'</b> — <b>protect by '+fmtD(_sprayByCache.dateISO)+'</b>.'+icsBtn+'</span>');
+  } else {
+    var peak=0,pi=-1;
+    for(var k=nowIdxCache;k<runCache.length;k++)if(runCache[k].cum>peak){peak=runCache[k].cum;pi=k;}
+    lines.push('<span class="okk">✓ Stays below your alert level ('+thr+' DH) through the 7-day forecast'+(pi>=0&&peak>0?' — peaks near '+fmtDH(peak)+' DH '+tLabel(runCache[pi].t):'')+'.</span>');
+  }
+  /* next forecast reset */
+  for(var j=Math.max(1,nowIdxCache);j<runCache.length;j++){
+    if(runCache[j].reset){lines.push('<span>♻ A dry stretch resets accumulation to zero around '+tLabel(runCache[j].t)+'.</span>');break;}
+  }
+  /* cultivar-tailored guidance (the 🌱 dropdown on the location in ⚙ Setup) */
+  var su=locSuscOf(activeLoc());
+  if(su!=='high')
+    lines.push('<span>🌱 This location grows <b>'+esc(BC_SUSC[su].label)+'</b> — first lesions typically from '+BC_SUSC[su].firstAt+' DH'+(su==='tol'?'; the levels shown overstate risk for resistant hybrids':'')+'.</span>');
+  /* lesion estimate when meaningful */
+  if(cum>=160){var le=bcLesions(cum);
+    if(su==='susc')
+      lines.push('<span>🔬 At '+fmtDH(cum)+' DH the model estimates roughly '+le.amer.toFixed(0)+' lesions/plant on American (susceptible) boxwood — your setting here (approximate).</span>');
+    else if(su==='tol')
+      lines.push('<span>🔬 Published estimates at '+fmtDH(cum)+' DH: ~'+le.engl.toFixed(0)+' lesions/plant highly susceptible · ~'+le.amer.toFixed(0)+' susceptible — resistant hybrids typically show far less (approximate).</span>');
+    else
+      lines.push('<span>🔬 At '+fmtDH(cum)+' DH the model estimates roughly '+le.engl.toFixed(0)+' lesions/plant on highly susceptible and '+le.amer.toFixed(0)+' on susceptible varieties (approximate).</span>');
+  }
+  document.getElementById('st-lines').innerHTML=lines.join('');
+}
+
+/* ── the accumulated-risk chart (SVG, no library) ── */
+function renderChart(){
+  var wrap=document.getElementById('chart-wrap');
+  var old=document.getElementById('chart-svg');if(old)old.parentNode.removeChild(old);
+  document.getElementById('range-sel').value=String(state.chartDays);
+  var lyb=document.getElementById('ly-btn');
+  if(lyb)lyb.classList.toggle('on',!!state.lastYear);
+  if(!runCache.length)return;
+  var start=Math.max(0,nowIdxCache-state.chartDays*24);
+  var hrs=hoursCache.slice(start),run=runCache.slice(start),now=Math.max(0,nowIdxCache-start);
+  var n=run.length;if(n<2)return;
+  var W=1100,H=330,L=46,R=12,T=20,B=36,iw=W-L-R,ih=H-T-B;
+  var maxC=0;run.forEach(function(r){if(r.cum>maxC)maxC=r.cum;});
+  var thr=curThr();
+  /* 👻 last-year overlay: same weeks last year, keyed to this year's hours */
+  var lyMap=null;
+  if(state.lastYear&&_lyCache&&activeLoc()&&_lyCache.locId===activeLoc().id&&_lyCache.hours.length){
+    var lyHours=_lyCache.hours.map(function(a){
+      var t=a[0],hour=parseInt(t.slice(11,13),10);
+      return {t:t,date:t.slice(0,10),hour:hour,month:parseInt(t.slice(5,7),10),
+        temp:a[1],rh:a[2],rain:a[3]||0,wind:a[4],isDay:a[5]===1};
+    });
+    var lyRun=bcRun(lyHours,{rhWet:state.rhWet,lwWet:state.lwWet});
+    lyMap={};
+    for(var q=0;q<lyHours.length;q++){
+      var tk=bcYearShift(lyHours[q].t);
+      if(tk){lyMap[tk]=lyRun[q].cum;if(lyRun[q].cum>maxC)maxC=lyRun[q].cum;}
+    }
+  }
+  var yMax=Math.max(thr*1.3,maxC*1.15,200);
+  var x=function(i){return L+i/(n-1)*iw;};
+  var y=function(c){return T+ih*(1-Math.min(c,yMax)/yMax);};
+  var s='<svg id="chart-svg" viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">';
+  /* band background strips + inside-left labels */
+  for(var b=0;b<BC_BANDS.length;b++){
+    var lo=BC_BANDS[b].at,hi=(b+1<BC_BANDS.length)?BC_BANDS[b+1].at:yMax;
+    if(lo>=yMax)break;
+    s+='<rect x="'+L+'" y="'+y(Math.min(hi,yMax))+'" width="'+iw+'" height="'+(y(lo)-y(Math.min(hi,yMax)))+'" fill="'+BC_BANDS[b].bg+'" opacity="0.55"/>';
+    if(b>0&&lo<yMax){
+      s+='<line x1="'+L+'" y1="'+y(lo)+'" x2="'+(W-R)+'" y2="'+y(lo)+'" stroke="'+BC_BANDS[b].bd+'" stroke-width="1"/>';
+      s+='<text x="'+(L+5)+'" y="'+(y(lo)-3)+'" font-size="9.5" fill="'+BC_BANDS[b].txt+'" font-weight="700">'+lo+' · '+esc(BC_BANDS[b].name)+'</text>';
+    }
+  }
+  /* y axis labels */
+  s+='<text x="'+(L-6)+'" y="'+(y(0)+4)+'" font-size="10" fill="#54655a" text-anchor="end">0</text>';
+  s+='<text x="'+(L-6)+'" y="'+(y(yMax)+8)+'" font-size="10" fill="#54655a" text-anchor="end">'+Math.round(yMax)+'</text>';
+  s+='<text x="13" y="'+(T+ih/2)+'" font-size="10" fill="#54655a" text-anchor="middle" transform="rotate(-90 13 '+(T+ih/2)+')">degree-hours</text>';
+  /* day ticks at local midnights */
+  var every=state.chartDays>14?2:1,dayN=0;
+  for(var i=0;i<n;i++){
+    if(hrs[i].hour===0){
+      s+='<line x1="'+x(i)+'" y1="'+T+'" x2="'+x(i)+'" y2="'+(T+ih)+'" stroke="#182619" stroke-opacity="0.07" stroke-width="1"/>';
+      if(dayN%every===0)s+='<text x="'+x(i)+'" y="'+(H-8)+'" font-size="9.5" fill="#54655a">'+dayShort(hrs[i].date)+'</text>';
+      dayN++;
+    }
+  }
+  /* protection windows from the spray log */
+  var mySprays=sprays.filter(function(sp){return !sp.locId||sp.locId===state.activeLoc;});
+  mySprays.forEach(function(sp){
+    var endISO=_sprayEff(sp).end;   /* label days, cut earlier by rain wash-off */
+    var a=-1,bI=-1;
+    for(var k=0;k<n;k++){
+      if(a<0&&hrs[k].date>=sp.date)a=k;
+      if(hrs[k].date<=endISO)bI=k;
+    }
+    if(a<0||bI<0||bI<a)return;
+    s+='<rect x="'+x(a)+'" y="'+T+'" width="'+Math.max(1,x(bI)-x(a))+'" height="'+ih+'" fill="#0e5a8a" opacity="0.06"/>';
+    s+='<text x="'+(x(a)+3)+'" y="'+(T+11)+'" font-size="10">🧴</text>';
+  });
+  /* forecast shading */
+  if(now<n){
+    s+='<rect x="'+x(now)+'" y="'+T+'" width="'+(x(n-1)-x(now))+'" height="'+ih+'" fill="#ffffff" opacity="0.4"/>';
+    s+='<text x="'+(x(now)+5)+'" y="'+(T+ih-6)+'" font-size="9.5" fill="#54655a" font-style="italic">forecast →</text>';
+    s+='<line x1="'+x(now)+'" y1="'+T+'" x2="'+x(now)+'" y2="'+(T+ih)+'" stroke="#182619" stroke-width="1.3" stroke-dasharray="4 3"/>';
+    s+='<text x="'+x(now)+'" y="'+(T-6)+'" font-size="10" fill="#182619" font-weight="700" text-anchor="middle">now</text>';
+  }
+  /* user threshold (this location's) */
+  if(thr<yMax){
+    s+='<line x1="'+L+'" y1="'+y(thr)+'" x2="'+(W-R)+'" y2="'+y(thr)+'" stroke="#0e5a8a" stroke-width="2" stroke-dasharray="7 4"/>';
+    s+='<text x="'+(W-R-4)+'" y="'+(y(thr)-5)+'" font-size="10" fill="#0e5a8a" font-weight="700" text-anchor="end">🔔 your alert level ('+thr+')</text>';
+  }
+  /* 👻 last year's curve (dashed gray; breaks where the archive has no hour) */
+  if(lyMap){
+    var lyPath='',pen=false,lyLastI=-1,lyLastV=null;
+    for(var p2=0;p2<n;p2++){
+      var v=lyMap[hrs[p2].t];
+      if(v==null){pen=false;continue;}
+      lyPath+=(pen?'L':'M')+x(p2).toFixed(1)+' '+y(v).toFixed(1);
+      pen=true;lyLastI=p2;lyLastV=v;
+    }
+    if(lyPath){
+      s+='<path d="'+lyPath+'" fill="none" stroke="#8a938c" stroke-width="1.6" stroke-dasharray="5 4" stroke-linejoin="round"/>';
+      if(lyLastI>=0)s+='<text x="'+Math.min(x(lyLastI)+4,W-R-60)+'" y="'+(y(lyLastV)-4)+'" font-size="9.5" fill="#8a938c" font-weight="700">last year</text>';
+    }
+  }
+  /* the cumulative-DH line */
+  var path='';
+  for(var p=0;p<n;p++)path+=(p?'L':'M')+x(p).toFixed(1)+' '+y(run[p].cum).toFixed(1);
+  s+='<path d="'+path+'" fill="none" stroke="#182619" stroke-width="2" stroke-linejoin="round"/>';
+  /* end label */
+  var last=run[n-1];
+  s+='<circle cx="'+x(n-1)+'" cy="'+y(last.cum)+'" r="3.5" fill="#182619"/>';
+  /* crosshair layer (populated on hover) */
+  s+='<g id="ch-cross"></g>';
+  s+='<rect id="ch-hit" x="'+L+'" y="'+T+'" width="'+iw+'" height="'+ih+'" fill="transparent" style="cursor:crosshair;"/>';
+  s+='</svg>';
+  wrap.insertAdjacentHTML('beforeend',s);
+  /* hover + click */
+  var svg=document.getElementById('chart-svg'),hit=document.getElementById('ch-hit'),tip=document.getElementById('chart-tip');
+  function idxFromEvent(ev){
+    var rect=svg.getBoundingClientRect();
+    var mx=(ev.clientX-rect.left)/rect.width*W;
+    var i=Math.round((mx-L)/iw*(n-1));
+    return Math.max(0,Math.min(n-1,i));
+  }
+  hit.addEventListener('mousemove',function(ev){
+    var i=idxFromEvent(ev),h=hrs[i],r=run[i],band=bcBand(r.cum);
+    var g=document.getElementById('ch-cross');
+    g.innerHTML='<line x1="'+x(i)+'" y1="'+T+'" x2="'+x(i)+'" y2="'+(T+ih)+'" stroke="#0e5a8a" stroke-width="1" stroke-opacity="0.6"/>'
+      +'<circle cx="'+x(i)+'" cy="'+y(r.cum)+'" r="4.5" fill="#0e5a8a" stroke="#fff" stroke-width="1.5"/>';
+    tip.innerHTML='<b>'+tLabel(h.t)+(i>=now?' · forecast':'')+'</b><br>'
+      +'<span style="color:#b9c2bb;">'+(h.newa?'🛰 ':(h.api?'🔌 ':(h.stn?'📡 ':'🌐 ')))+bcSrcName(h)+'</span><br>'
+      +(h.temp!=null?Math.round(h.temp)+'°F':'—')+' · RH '+(h.rh!=null?Math.round(h.rh)+'%':'—')+' · '+(h.rain>=0.005?h.rain.toFixed(2)+'" rain · ':'')+(h.wind!=null?Math.round(h.wind)+' mph':'')+'<br>'
+      +(r.wet?'💧 wet ('+r.lw+'/10) · +'+fmtDH(r.add)+' DH':'☀ dry ('+r.dry+'h)')+'<br>'
+      +'<b>'+fmtDH(r.cum)+' DH — '+esc(band.name)+'</b>'
+      +(lyMap&&lyMap[h.t]!=null?'<br><span style="color:#b9c2bb;">last year: '+fmtDH(lyMap[h.t])+' DH</span>':'');
+    tip.style.display='block';
+    var wrapRect=wrap.getBoundingClientRect();
+    var tx=(ev.clientX-wrapRect.left)+14,ty=(ev.clientY-wrapRect.top)-10;
+    if(tx+tip.offsetWidth>wrapRect.width-4)tx-=tip.offsetWidth+26;
+    tip.style.left=tx+'px';tip.style.top=ty+'px';
+  });
+  hit.addEventListener('mouseleave',function(){tip.style.display='none';document.getElementById('ch-cross').innerHTML='';});
+  hit.addEventListener('click',function(ev){
+    var i=idxFromEvent(ev),date=hrs[i].date;
+    for(var k=0;k<daysCache.length;k++)if(daysCache[k].date===date){selDay=date;renderDays();renderDetail(k);
+      document.getElementById('detail').scrollIntoView({behavior:'smooth'});break;}
+  });
+}
+
+function renderDays(){
+  var box=document.getElementById('days');
+  if(!daysCache.length){box.innerHTML='';return;}
+  var todayISO=nowTCache.slice(0,10);
+  var ti=0;daysCache.forEach(function(d,i){if(d.date===todayISO)ti=i;});
+  var from=Math.max(0,ti-7),show=daysCache.slice(from,from+14);
+  box.innerHTML=show.map(function(d){
+    var i=from+show.indexOf(d);
+    var band=bcBand(d.maxCum),fc=d.date>todayISO;
+    return '<button class="day'+(selDay===d.date?' sel':'')+(d.date===todayISO?' today':'')+(fc?' fc':'')+'" onclick="selDay=\''+d.date+'\';renderDays();renderDetail('+i+');document.getElementById(\'detail\').scrollIntoView({behavior:\'smooth\'});">'
+      +'<div class="dn">'+(d.date===todayISO?'Today':dayShort(d.date))+(fc?' ·f':'')+'</div>'
+      +'<div class="ic">'+(d.icon||'🌤')+'</div>'
+      +'<div class="tt">'+(d.hi!=null?Math.round(d.hi)+'° <span>'+Math.round(d.lo)+'°</span>':'')+'</div>'
+      +'<span class="chip" style="background:'+band.bg+';color:'+band.txt+';border-color:'+band.bd+';">'+fmtDH(d.maxCum)+' DH</span>'
+      +'<div class="wet">'+(d.wetH?d.wetH+'h wet':'dry day')+'</div>'
+      +'</button>';
+  }).join('');
+}
+function renderDetail(i){
+  var d=daysCache[i];if(!d)return;
+  document.getElementById('detail').style.display='';
+  var todayISO=nowTCache.slice(0,10);
+  document.getElementById('d-title').textContent='⏱ '+new Date(d.date+'T12:00:00').toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'})+(d.date>todayISO?' (forecast)':'');
+  var band=bcBand(d.maxCum);
+  document.getElementById('d-sub').textContent='Peak '+fmtDH(d.maxCum)+' DH ('+band.name+') · '+d.wetH+' wet hour'+(d.wetH===1?'':'s')+' · ends the day at '+fmtDH(d.endCum)+' DH';
+  var rows='<tr><th>Hour</th><th>Temp</th><th>RH</th><th>Rain</th><th>Wind</th><th>Leaf wetness</th><th>+DH</th><th>Total DH</th><th>Level</th></tr>';
+  d.rows.forEach(function(row){
+    var h=row.h,r=row.r,b=bcBand(r.cum),fc=h.t>nowTCache;
+    rows+='<tr class="'+(r.wet?'h-wet':'')+(fc?' h-fc':'')+'">'
+      +'<td>'+bcFmtHour(h.hour)+'</td>'
+      +'<td>'+(h.temp!=null?Math.round(h.temp)+'°':'—')+'</td>'
+      +'<td>'+(h.rh!=null?Math.round(h.rh)+'%':'—')+'</td>'
+      +'<td>'+(h.rain>=0.005?h.rain.toFixed(2)+'"':'')+'</td>'
+      +'<td>'+(h.wind!=null?Math.round(h.wind):'—')+'</td>'
+      +'<td>'+(h.newa?'🛰 ':(h.api?'🔌 ':(h.stn?'📡 ':'')))+(r.wet?'💧 wet ('+r.lw+'/10)':(r.reset?'☀ dry — <b>reset</b> (6h dry)':'☀ dry'))+(h.stn&&h.lwObs!=null?' — measured':'')+'</td>'
+      +'<td>'+(r.add?'+'+fmtDH(r.add):'')+'</td>'
+      +'<td class="cum" style="background:'+b.bg+';color:'+b.txt+';">'+fmtDH(r.cum)+'</td>'
+      +'<td style="color:'+b.txt+';font-weight:600;">'+esc(b.name)+'</td></tr>';
+  });
+  document.getElementById('d-table').innerHTML=rows;
+}
+function renderBandTable(){
+  var t=document.getElementById('band-table');
+  var rows='<tr><th>DH reached</th><th>Risk level</th><th>What it means</th></tr>';
+  BC_BANDS.forEach(function(b,i){
+    var hi=(i+1<BC_BANDS.length)?'–'+(BC_BANDS[i+1].at-1):'+';
+    rows+='<tr style="background:'+b.bg+';"><td style="font-weight:700;color:'+b.txt+';">'+b.at+hi+'</td>'
+      +'<td style="font-weight:700;color:'+b.txt+';">'+esc(b.name)+'</td><td>'+esc(b.sub)+'</td></tr>';
+  });
+  t.innerHTML=rows;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Excel (CSV) exports + calendar reminder
+   ════════════════════════════════════════════════════════════════════════ */
+function dlText(fname,text,mime){
+  /* leading BOM so Excel opens UTF-8 CSVs with accents intact */
+  var b=new Blob(['\uFEFF'+text],{type:mime||'text/csv;charset=utf-8'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fname;a.click();
+}
+function sprayCsv(){
+  var mine=sprays.filter(function(s){return !s.locId||s.locId===state.activeLoc;})
+    .sort(function(a,b){return a.date<b.date?-1:1;});
+  if(!mine.length){toast('No sprays logged at this location yet');return;}
+  var rows=[['Location','Date applied','Product','FRAC group','Protects (days)','Wash-off (in)','Rain since (in)','Protected through','Cut by wash-off','DH at application','Risk level at application']];
+  mine.forEach(function(s){
+    var eff=_sprayEff(s);
+    rows.push([locName(s.locId),s.date,s.name||'',s.frac||'',s.days,
+      s.wash||'',s.wash?bcRainSince(hoursCache,s.date,nowTCache):'',
+      eff.end,eff.washed?'yes':'',
+      s.dhAt!=null?s.dhAt:'',s.bandAt||'']);
+  });
+  dlText('BlightCast_spray_log_'+localISO()+'.csv',bcCsv(rows));
+  toast('Spray log downloaded — opens in Excel');
+}
+function riskCsv(){
+  if(!daysCache.length){toast('No risk data loaded yet');return;}
+  var todayISO=nowTCache.slice(0,10);
+  var rows=[['Date','Hi °F','Lo °F','Wet hours','DH at end of day','Peak DH','Risk level at peak','Actual / forecast','Weather source']];
+  daysCache.forEach(function(d){
+    rows.push([d.date,d.hi!=null?Math.round(d.hi):'',d.lo!=null?Math.round(d.lo):'',d.wetH,
+      d.endCum,d.maxCum,bcBand(d.maxCum).name,d.date>todayISO?'forecast':'actual',bcDaySrc(d)]);
+  });
+  var nm=activeLoc()?activeLoc().name.replace(/[^\w]+/g,'_'):'';
+  dlText('BlightCast_risk_history_'+nm+'_'+localISO()+'.csv',bcCsv(rows));
+  toast('Risk history downloaded — opens in Excel');
+}
+function bcHourlyCsv(){
+  if(!hoursCache.length){toast('No data loaded yet');return;}
+  var rows=[['Date','Hour','Weather source','Temp °F','RH %','Rain in','Wind mph','Leaf wetness (0–10)','Wetness source','+DH','Total DH','Level','Actual / forecast']];
+  for(var i=0;i<hoursCache.length;i++){
+    var h=hoursCache[i],r=runCache[i];
+    rows.push([h.date,bcFmtHour(h.hour),bcSrcName(h),
+      h.temp!=null?Math.round(h.temp*10)/10:'',h.rh!=null?Math.round(h.rh):'',
+      h.rain!=null?h.rain:'',h.wind!=null?Math.round(h.wind*10)/10:'',
+      r.lw,h.lwObs!=null?(h.newa?'sensor (NEWA)':(h.api?'sensor (your station)':'sensor (imported)')):'estimated',
+      r.add?r.add:'',r.cum,bcBand(r.cum).name,
+      h.t>nowTCache?'forecast':'actual']);
+  }
+  var nm=activeLoc()?activeLoc().name.replace(/[^\w]+/g,'_'):'';
+  dlText('BlightCast_hourly_'+nm+'_'+localISO()+'.csv',bcCsv(rows));
+  toast('Hourly record downloaded ('+(rows.length-1)+' hours) — opens in Excel');
+}
+/* 📸 chart snapshot — a self-contained shareable PNG: header (location,
+   current DH + level, alert level, timestamp) + the live SVG + model credit */
+function chartSnapshot(){
+  var svg=document.getElementById('chart-svg');
+  if(!svg||!runCache.length){toast('No chart to snapshot yet — add a 📍 location first');return;}
+  var W=1100,H=330,head=64,foot=26,scale=2;
+  var clone=svg.cloneNode(true);
+  var cross=clone.querySelector?clone.querySelector('#ch-cross'):null;
+  if(cross)cross.innerHTML='';                     /* no stray crosshair in the picture */
+  clone.setAttribute('width',W);clone.setAttribute('height',H);
+  clone.setAttribute('font-family','Segoe UI, system-ui, sans-serif');
+  var xml=new XMLSerializer().serializeToString(clone);
+  var img=new Image();
+  img.onload=function(){
+    try{
+      var c=document.createElement('canvas');
+      c.width=W*scale;c.height=(H+head+foot)*scale;
+      var g=c.getContext('2d');g.scale(scale,scale);
+      g.fillStyle='#ffffff';g.fillRect(0,0,W,H+head+foot);
+      var i=Math.max(0,Math.min(nowIdxCache-1,runCache.length-1));
+      var cum=runCache[i]?runCache[i].cum:0,band=bcBand(cum);
+      g.fillStyle='#182619';g.font='700 22px "Segoe UI", system-ui, sans-serif';
+      g.fillText('🌿 BlightCast — boxwood blight infection risk',16,30);
+      g.fillStyle='#54655a';g.font='600 14px "Segoe UI", system-ui, sans-serif';
+      g.fillText((activeLoc()?activeLoc().name+' · ':'')
+        +new Date().toLocaleString([],{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})
+        +' · now: '+fmtDH(cum)+' DH ('+band.name+') · alert level '+curThr()+' DH',16,52);
+      g.drawImage(img,0,head,W,H);
+      g.fillStyle='#54655a';g.font='11px "Segoe UI", system-ui, sans-serif';
+      g.fillText('Risk model: USPest.org / Oregon State Univ. boxwood blight model v3.0 · weather: Open-Meteo · made with BlightCast',16,head+H+17);
+      var nm=(activeLoc()?activeLoc().name.replace(/[^\w]+/g,'_')+'_':'')+localISO();
+      c.toBlob(function(b){if(b)_snapShare(b,'BlightCast_'+nm+'.png');else toast('Snapshot failed in this browser');},'image/png');
+    }catch(e){toast('Snapshot failed ('+e.message+')');}
+  };
+  img.onerror=function(){toast('Snapshot failed — the chart could not be rendered as an image');};
+  img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(xml);
+}
+function _snapShare(b,fname){
+  var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fname;a.click();
+  /* bonus where the browser allows it (needs https/localhost): straight to the clipboard */
+  var copied=false;
+  try{
+    if(typeof navigator!=='undefined'&&navigator.clipboard&&typeof ClipboardItem!=='undefined'){
+      navigator.clipboard.write([new ClipboardItem({'image/png':b})])
+        .then(function(){toast('Snapshot saved — and copied to the clipboard, ready to paste');},function(){});
+      copied=true;
+    }
+  }catch(e){}
+  if(!copied)toast('Snapshot saved — attach the PNG to a text or email');
+}
+function icsSprayBy(){
+  if(!_sprayByCache)return;
+  var date=_sprayByCache.dateISO,today=localISO();
+  if(date<today)date=today;                    /* never remind in the past */
+  var d=date.replace(/-/g,'');
+  var stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
+  var evt={uid:'bc_'+date+'_'+(state.activeLoc||'x')+'@blightcast',
+    start:d+'T070000',end:d+'T080000',
+    summary:'Re-spray boxwood — blight risk (BlightCast)',
+    desc:'Accumulated boxwood blight risk is forecast to reach your alert level ('+curThr()+' DH)'
+      +(activeLoc()?' at '+activeLoc().name:'')+'. Planned with BlightCast.'};
+  dlText('BlightCast_respray_'+date+'.ics',bcIcs([evt],stamp),'text/calendar');
+  toast('Calendar file downloaded — open it and save the event (reminders included)');
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Alert bell — chimes when a NEW forecast crossing of the alert level shows up
+   ════════════════════════════════════════════════════════════════════════ */
+function bellRender(){
+  var b=document.getElementById('bell-btn');
+  if(b)b.textContent=state.bell?'🔔 Alerts ON':'🔕 Alerts';
+}
+function bellToggle(){
+  state.bell=!state.bell;bcSaveK(BCK.state,state);bellRender();
+  if(state.bell){beep();toast('Alerts ON — you\'ll hear a chime when a new crossing appears (while the page is open)');}
+}
+function beep(){
+  try{
+    var A=window.AudioContext||window.webkitAudioContext;if(!A)return;
+    var a=new A(),o=a.createOscillator(),g=a.createGain();
+    o.connect(g);g.connect(a.destination);
+    o.frequency.value=880;g.gain.value=0.12;o.start();
+    setTimeout(function(){o.stop();a.close();},350);
+  }catch(e){}
+}
+function alertCheck(){alertCheckRun(runCache,nowIdxCache,state.activeLoc);}
+/* one location's run → chime on a NEW crossing (compare strip feeds the
+   other locations through here, so the bell watches ALL of them) */
+function alertCheckRun(run,nowI,locKey){
+  if(!state.bell||!run||!run.length)return;
+  var thr=locKey?thrForId(locKey):state.threshold;   /* each location's own level */
+  var x=bcCrossing(run,thr,nowI);
+  var sig=x>=0?(thr+'@'+run[x].t):'';
+  var key=locKey||'_';
+  if(!state.alertSigs)state.alertSigs={};
+  if(sig&&state.alertSigs[key]!==sig){
+    state.alertSigs[key]=sig;bcSaveK(BCK.state,state);
+    beep();toast('🔔 '+(locKey?locName(locKey)+': ':'')+'risk is forecast to cross your alert level ('+thr+' DH) '+tLabel(run[x].t));
+  } else if(!sig&&state.alertSigs[key]){
+    state.alertSigs[key]='';bcSaveK(BCK.state,state);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   🛰 NEWA station link — hourly data pulled straight from Cornell's NRCC
+   service (CORS-open, verified 2026-08-10). A linked station refreshes on
+   every page open; its leaf-wetness sensor drives the model directly.
+   Precedence: your own CSV > NEWA > Open-Meteo.
+   ════════════════════════════════════════════════════════════════════════ */
+var _newaCache=null; /* {locId,hours:[…expanded…]} for the ACTIVE location */
+var NEWA_NETS={newa:'NEWA',njwx:'Rutgers NJWxNet',icao:'airport — no leaf-wetness sensor',
+  miwx:'MI EnviroWeather',oardc:'Ohio OARDC',cu_log:'Cornell',nysm:'NY Mesonet'};
+function newaNetName(net){return NEWA_NETS[net]||net;}
+function newaKey(locId){return 'blightcast_newa_'+locId;}
+function newaStations(cb){
+  var mk='blightcast_newastations_v1';
+  try{
+    var c=JSON.parse(localStorage.getItem(mk)||'null');
+    if(c&&c.at&&(Date.now()-c.at)<7*86400000&&c.stations){cb(c.stations);return;}
+  }catch(e){}
+  fetch('https://newa.nrcc.cornell.edu/newaUtil/stateStationList/all')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var st=(d&&d.stations)||[];
+      if(st.length)try{localStorage.setItem(mk,JSON.stringify({at:Date.now(),stations:st}));}catch(e2){}
+      cb(st.length?st:null);
+    })
+    .catch(function(){
+      try{var c2=JSON.parse(localStorage.getItem(mk)||'null');if(c2&&c2.stations){cb(c2.stations);return;}}catch(e3){}
+      cb(null);
+    });
+}
+function newaFind(){
+  var l=activeLoc();
+  if(!l){toast('Add a 📍 location first (⚙ Setup)');return;}
+  var box=document.getElementById('newa-results');
+  box.innerHTML='<div class="li">Loading the station list…</div>';
+  newaStations(function(list){
+    if(!list){box.innerHTML='<div class="li">Couldn\'t reach the NEWA station list — check the internet connection and try again.</div>';return;}
+    var near=bcNearest(list,l.lat,l.lon,8);
+    box._near=near;
+    box.innerHTML=near.length?near.map(function(x,i){
+      return '<div class="li"><div class="grow"><b>🛰 '+esc(x.s.name)+'</b><small>'+esc(newaNetName(x.s.network))+' · '+x.mi.toFixed(1)+' mi from '+esc(l.name)+'</small></div>'
+        +'<button class="btn pri" onclick="newaLink('+i+')">Link</button></div>';
+    }).join(''):'<div class="li">No stations found near '+esc(l.name)+'.</div>';
+  });
+}
+function newaLink(i){
+  var l=activeLoc();if(!l)return;
+  var box=document.getElementById('newa-results');
+  var x=box._near&&box._near[i];if(!x)return;
+  l.newa={sid:x.s.id+' '+x.s.network,name:x.s.name,net:x.s.network};
+  bcSaveK(BCK.locs,locs);
+  try{localStorage.removeItem(newaKey(l.id));}catch(e){}
+  _newaCache=null;
+  box.innerHTML='';box._near=null;
+  newaRender();renderAll();
+  toast('🛰 Linked to '+x.s.name+' — pulling station data');
+}
+function newaUnlink(locId){
+  var l=locs.find(function(x){return x.id===locId;});if(!l||!l.newa)return;
+  if(!confirm('Unlink the station "'+l.newa.name+'" from '+l.name+'? BlightCast goes back to Open-Meteo (plus any imported CSV) there.'))return;
+  delete l.newa;
+  bcSaveK(BCK.locs,locs);
+  try{localStorage.removeItem(newaKey(locId));}catch(e){}
+  if(state.activeLoc===locId)_newaCache=null;
+  newaRender();renderAll();
+}
+function newaRender(){
+  var box=document.getElementById('newa-status');if(!box)return;
+  var items=[];
+  locs.forEach(function(l){
+    if(!l.newa)return;
+    var c=bcLoadK(newaKey(l.id),null);
+    var thru=c&&c.hours&&c.hours.length?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
+    var lw=c?(c.lwet?'leaf wetness ✓ (sensor)':'no leaf-wetness sensor — wetness estimated'):'';
+    items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🛰 '+esc(l.newa.name)
+      +'<small>'+esc(newaNetName(l.newa.net))+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
+      +'<button class="sbtn warn" onclick="newaUnlink(\''+l.id+'\')">✕ unlink</button></div>');
+  });
+  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">No station linked — 🔍 search below (free, no account).</div>';
+}
+/* fetch a linked station's last 31 days; 60-min cache; offsetSec = the
+   location's UTC offset (from its Open-Meteo reply) so the end date is
+   never in the station's future */
+function newaFetchLoc(l,offsetSec,cb){
+  if(!l||!l.newa){cb([]);return;}
+  var mk=newaKey(l.id);
+  function expand(c){
+    return stnExpand(c).map(function(h){h.newa=true;return h;});
+  }
+  try{
+    var c=JSON.parse(localStorage.getItem(mk)||'null');
+    if(c&&c.sid===l.newa.sid&&c.at&&(Date.now()-c.at)<60*60000){cb(expand(c));return;}
+  }catch(e){}
+  var off=(typeof offsetSec==='number')?offsetSec:-5*3600;
+  var nowLoc=new Date(Date.now()+off*1000);
+  var pad=function(n){return ('0'+n).slice(-2);};
+  var stamp=function(d,h){return d.getUTCFullYear()+pad(d.getUTCMonth()+1)+pad(d.getUTCDate())+pad(h==null?d.getUTCHours():h);};
+  var sd=new Date(nowLoc.getTime()-31*86400000);
+  var body={sid:l.newa.sid,sdate:stamp(sd,0),edate:stamp(nowLoc)};
+  fetch('https://hrly.nrcc.cornell.edu/stnHrly',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){
+      var res=d?bcNewaHours(d):{hours:[],lwet:false};
+      if(res.hours.length){
+        var blob={sid:l.newa.sid,at:Date.now(),lwet:res.lwet,
+          hours:res.hours.map(function(h){return [h.t,h.temp,h.rh,h.rain,h.wind,h.lwObs];})};
+        try{localStorage.setItem(mk,JSON.stringify(blob));}catch(e2){}
+        newaRender();
+        cb(res.hours);
+      } else {
+        try{var c3=JSON.parse(localStorage.getItem(mk)||'null');if(c3&&c3.sid===l.newa.sid){cb(expand(c3));return;}}catch(e4){}
+        cb([]);
+      }
+    })
+    .catch(function(){
+      try{var c2=JSON.parse(localStorage.getItem(mk)||'null');if(c2&&c2.sid===l.newa.sid){cb(expand(c2));return;}}catch(e5){}
+      cb([]);
+    });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   🔌 Your station's own cloud API — LI-COR Cloud (HOBO RX) natively, or any
+   CSV/JSON feed URL mapped once through the column mapper. The token/URL
+   lives on the location (this browser only; never in share links).
+   Precedence: manual CSV > 🔌 API > 🛰 NEWA > Open-Meteo.
+   ════════════════════════════════════════════════════════════════════════ */
+var _apiCache=null;   /* {locId,hours} for the ACTIVE location */
+var _apiScan=null;    /* device scan shown in the connect modal */
+function apiKey(locId){return 'blightcast_api_'+locId;}
+function _apiSig(api){
+  if(!api)return '';
+  if(api.kind==='licor')return 'licor|'+String(api.token||'').slice(-6)+'|'+api.device+'|'+api.air+'|'+api.rain+'|'+api.wind+'|'+(api.lw||'');
+  return 'feed|'+(api.url||'')+'|'+JSON.stringify(api.map||{})+'|'+JSON.stringify(api.units||{});
+}
+function _apiMergeCache(locId,sig,newHours,lwet){
+  var by={};
+  try{
+    var c=JSON.parse(localStorage.getItem(apiKey(locId))||'null');
+    if(c&&c.sig===sig&&c.hours)c.hours.forEach(function(a){by[a[0]]=a;});
+  }catch(e){}
+  var maxD=new Date();maxD.setDate(maxD.getDate()+2);
+  var maxISO=maxD.getFullYear()+'-'+('0'+(maxD.getMonth()+1)).slice(-2)+'-'+('0'+maxD.getDate()).slice(-2);
+  newHours.forEach(function(h){if(h.date<=maxISO)by[h.t]=[h.t,h.temp,h.rh,h.rain,h.wind,h.lwObs];});
+  var keys=Object.keys(by).sort();
+  if(keys.length){
+    var cut=new Date(keys[keys.length-1].slice(0,10)+'T00:00:00');cut.setDate(cut.getDate()-40);
+    var cutISO=cut.getFullYear()+'-'+('0'+(cut.getMonth()+1)).slice(-2)+'-'+('0'+cut.getDate()).slice(-2);
+    keys=keys.filter(function(k){return k.slice(0,10)>=cutISO;});
+  }
+  var blob={sig:sig,at:Date.now(),lwet:!!lwet,hours:keys.map(function(k){return by[k];})};
+  try{localStorage.setItem(apiKey(locId),JSON.stringify(blob));}catch(e2){}
+  return blob;
+}
+function _apiExpand(blob){
+  return stnExpand(blob).map(function(h){h.api=true;return h;});
+}
+/* fetch a linked API's data; 60-min cache; incremental after the first pull */
+function apiFetchLoc(l,offsetSec,cb){
+  if(!l||!l.api){cb([]);return;}
+  var sig=_apiSig(l.api),cached=null;
+  try{
+    var c=JSON.parse(localStorage.getItem(apiKey(l.id))||'null');
+    if(c&&c.sig===sig)cached=c;
+  }catch(e){}
+  if(cached&&(Date.now()-cached.at)<60*60000){cb(_apiExpand(cached));return;}
+  var fail=function(){cb(cached?_apiExpand(cached):[]);};
+  if(l.api.kind==='licor'){
+    var endMs=Date.now();
+    var startMs=endMs-31*86400000;
+    if(cached&&cached.hours.length){
+      var lastT=cached.hours[cached.hours.length-1][0];
+      /* lastT is STATION-LOCAL; parse as UTC then remove the offset — a
+         plain Date() parse is browser-local and double-applies the offset,
+         leaving a permanent hour gap after every refresh (08-10 review) */
+      var ms=new Date(lastT+':00Z').getTime()-(offsetSec||0)*1000;
+      if(isFinite(ms)&&ms>startMs)startMs=ms-3*3600000;
+    }
+    var chans=l.api.channels&&l.api.channels.length?l.api.channels:[null];
+    Promise.all(chans.map(function(ch){
+      var u='https://api.licor.cloud/v2/data?deviceSerialNumber='+encodeURIComponent(l.api.device)
+        +(ch?'&sensorSerialNumber='+encodeURIComponent(ch):'')
+        +'&startTime='+Math.floor(startMs)+'&endTime='+Math.floor(endMs);
+      return fetch(u,{headers:{'Authorization':'Bearer '+l.api.token}})
+        .then(function(r){return r.ok?r.json():null;});
+    })).then(function(replies){
+      replies=replies.filter(function(x){return x;});
+      if(!replies.length){fail();return;}
+      var res=bcLicorHours(replies,{air:l.api.air,rain:l.api.rain,wind:l.api.wind,lw:l.api.lw},offsetSec);
+      var blob=_apiMergeCache(l.id,sig,res.hours,res.lwet||(cached&&cached.lwet));
+      apiRender();
+      cb(_apiExpand(blob));
+    }).catch(fail);
+  } else if(l.api.kind==='feed'){
+    fetch(l.api.url)
+      .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+      .then(function(text){
+        var rows=null;
+        try{rows=bcJsonRows(JSON.parse(text));}catch(e2){}
+        if(!rows)rows=bcCsvParse(text);
+        var map=l.api.map;
+        if(l.api.hasHeader&&rows.length){
+          /* the saved map is positional — if the service reorders or adds
+             columns/JSON keys, re-resolve by the SAVED header names; a name
+             that vanished means the schema changed → keep cached data
+             rather than read wrong columns (08-10 review) */
+          if(l.api.header&&l.api.header.length){
+            var hdr=rows[0].map(String),remap={},okAll=true;
+            Object.keys(map).forEach(function(k){
+              var idx=map[k];
+              if(idx==null||idx<0){remap[k]=-1;return;}
+              var nm=String(l.api.header[idx]||'');
+              var j=hdr.indexOf(nm);
+              if(j<0&&nm!=='')okAll=false;
+              remap[k]=j;
+            });
+            if(!okAll){fail();return;}
+            map=remap;
+          }
+          rows=rows.slice(1);
+        }
+        var res=bcStnHours(rows,map,l.api.units);
+        if(!res.hours.length){fail();return;}
+        var blob=_apiMergeCache(l.id,sig,res.hours,res.lwMode&&res.lwMode!=='none');
+        apiRender();
+        cb(_apiExpand(blob));
+      }).catch(fail);
+  } else cb([]);
+}
+function apiRender(){
+  var box=document.getElementById('api-status');if(!box)return;
+  var items=[];
+  locs.forEach(function(l){
+    if(!l.api)return;
+    var c=bcLoadK(apiKey(l.id),null);
+    var thru=(c&&c.hours&&c.hours.length)?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
+    var what=l.api.kind==='licor'?('LI-COR · logger '+l.api.device):('feed · '+String(l.api.url||'').replace(/^https?:\/\//,'').slice(0,40)+'…');
+    var lw=c?(c.lwet?'leaf wetness ✓':'no leaf-wetness data — estimated'):'';
+    items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🔌 '+esc(l.api.name||what)
+      +'<small>'+esc(what)+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
+      +'<button class="sbtn warn" onclick="apiUnlink(\''+l.id+'\')">✕ disconnect</button></div>');
+  });
+  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">Nothing connected — the two buttons below are for stations with their own cloud service.</div>';
+}
+function apiUnlink(locId){
+  var l=locs.find(function(x){return x.id===locId;});if(!l||!l.api)return;
+  if(!confirm('Disconnect "'+(l.api.name||l.api.kind)+'" from '+l.name+'? (The saved token/link is removed from this browser.)'))return;
+  delete l.api;
+  bcSaveK(BCK.locs,locs);
+  try{localStorage.removeItem(apiKey(locId));}catch(e){}
+  if(state.activeLoc===locId)_apiCache=null;
+  apiRender();renderAll();
+}
+/* — LI-COR connect flow — */
+function apiLicorOpen(){
+  if(!activeLoc()){toast('Add a 📍 location first (⚙ Setup)');return;}
+  _apiScan=null;
+  document.getElementById('al-results').innerHTML='';
+  document.getElementById('al-locname').textContent=activeLoc().name;
+  document.getElementById('al-token').value=(activeLoc().api&&activeLoc().api.kind==='licor'&&activeLoc().api.token)||'';
+  mOpen('m-api');
+}
+function apiLicorFind(){
+  var tok=String(document.getElementById('al-token').value||'').trim();
+  if(!tok){alert('Paste the API token first (licor.cloud → Data → API).');return;}
+  var box=document.getElementById('al-results');
+  box.innerHTML='<div class="li">Checking the token + listing your loggers…</div>';
+  fetch('https://api.licor.cloud/v2/devices',{headers:{'Authorization':'Bearer '+tok}})
+    .then(function(r){if(!r.ok)throw new Error(r.status===401?'That token was refused (401) — copy it again from licor.cloud → Data → API.':'HTTP '+r.status);return r.json();})
+    .then(function(d){
+      var scan=bcLicorScan(d);
+      if(!scan.length)throw new Error('The token works but no loggers are on the account.');
+      _apiScan={token:tok,devices:scan};
+      box.innerHTML=scan.map(function(dev,i){
+        var airSel=dev.air.length
+          ?'<select class="inp" id="al-air-'+i+'" style="margin-top:4px;">'+dev.air.map(function(s,j){return '<option value="'+esc(s)+'"'+(j===0?' selected':'')+'>air sensor '+esc(s)+'</option>';}).join('')+'</select>'
+          :'<div class="note" style="color:var(--bad);">⚠ no sensor with temperature + humidity — BlightCast can\'t run on this logger</div>';
+        return '<div class="li" style="flex-wrap:wrap;"><div class="grow"><b>🔌 '+esc(dev.name||dev.device)+'</b>'
+          +'<small>logger '+esc(dev.device)+' · '+dev.serials.length+' sensors · '
+          +(dev.rain?'rain ✓':'no rain gauge')+' · '+(dev.wind?'wind ✓':'no wind')+' · '+(dev.lw?'leaf wetness ✓ (sensor!)':'no leaf-wetness sensor')+'</small>'
+          +airSel+'</div>'
+          +(dev.air.length?'<button class="btn pri" onclick="apiLicorSave('+i+')">Connect</button>':'')+'</div>';
+      }).join('');
+    })
+    .catch(function(e){box.innerHTML='<div class="li" style="color:var(--bad);">✕ '+esc(e.message)+'</div>';});
+}
+function apiLicorSave(i){
+  var l=activeLoc();if(!l||!_apiScan)return;
+  var dev=_apiScan.devices[i];if(!dev)return;
+  var sel=document.getElementById('al-air-'+i);
+  var air=(sel&&sel.value)||dev.air[0];
+  var picks={air:air,rain:dev.rain,wind:dev.wind,lw:dev.lw};
+  l.api={kind:'licor',token:_apiScan.token,device:dev.device,name:dev.name||('logger '+dev.device),
+    air:picks.air,rain:picks.rain,wind:picks.wind,lw:picks.lw,
+    channels:bcLicorChannels(dev,picks)};
+  bcSaveK(BCK.locs,locs);
+  try{localStorage.removeItem(apiKey(l.id));}catch(e){}
+  _apiCache=null;_apiScan=null;
+  mClose('m-api');
+  apiRender();renderAll();
+  toast('🔌 Connected — pulling a month of station data'+(dev.lw?' (with real leaf wetness!)':''));
+}
+/* — generic feed connect: fetch, then hand off to the CSV mapper — */
+function apiFeedConnect(){
+  if(!activeLoc()){toast('Add a 📍 location first (⚙ Setup)');return;}
+  var url=prompt('Paste the address (URL) that returns your station\'s readings as CSV or JSON — e.g. a mesonet CSV link or your station service\'s API URL (with its key included):',
+    (activeLoc().api&&activeLoc().api.kind==='feed'&&activeLoc().api.url)||'');
+  if(url==null)return;
+  url=url.trim();
+  if(!/^https:\/\//i.test(url)){if(url)alert('That doesn\'t look like a link — it should start with https://');return;}
+  fetch(url)
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+    .then(function(text){
+      var rows=null;
+      try{rows=bcJsonRows(JSON.parse(text));}catch(e){}
+      if(rows)stnHandleText(bcCsv(rows),url,url);
+      else stnHandleText(text,url,url);
+    })
+    .catch(function(e){alert('Couldn\'t read that address: '+e.message+'\n\nThe link must be reachable from a browser (some APIs need the key in the URL).');});
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   📡 Station-data import (CSV column mapper) — parse + preview + save.
+   The working column map lives in _stnPending (not read back from the DOM)
+   so the mock-DOM runtime test can drive the whole flow.
+   ════════════════════════════════════════════════════════════════════════ */
+var _stnPending=null;
+var STN_FIELDS=[
+  {k:'dt',label:'Date + time (one column)'},
+  {k:'date',label:'Date column'},
+  {k:'time',label:'Time column'},
+  {k:'temp',label:'Air temperature',units:[['F','°F'],['C','°C']]},
+  {k:'rh',label:'Relative humidity %'},
+  {k:'rain',label:'Rain',units:[['in','inches'],['mm','mm']]},
+  {k:'wind',label:'Wind speed',units:[['mph','mph'],['kmh','km/h'],['ms','m/s']]},
+  {k:'lw',label:'Leaf wetness (optional)',units:[['auto','auto-detect'],['flag','wet/dry (0–1)'],['scale','0–10'],['minutes','minutes wet']]}
+];
+function stnUnitGuess(header,map){
+  var u={temp:'F',rain:'in',wind:'mph',lw:'auto'};
+  function h(i){return i>=0&&header[i]!=null?String(header[i]).toLowerCase():'';}
+  if(/°c|\(c\)|celsius|deg c/.test(h(map.temp)))u.temp='C';
+  if(/mm|millim/.test(h(map.rain)))u.rain='mm';
+  if(/km\/?h|kph/.test(h(map.wind)))u.wind='kmh';
+  else if(/m\/s|mps/.test(h(map.wind)))u.wind='ms';
+  return u;
+}
+function stnFile(inp){
+  var f=inp.files&&inp.files[0];if(!f)return;
+  if(!locs.length){toast('Add a 📍 location first — the data needs a home');inp.value='';return;}
+  var rd=new FileReader();
+  rd.onload=function(){stnHandleText(String(rd.result||''),f.name);};
+  rd.readAsText(f);
+  inp.value='';
+}
+function stnHandleText(text,fname,feedUrl){
+  var rows=bcCsvParse(text);
+  if(rows.length<2){alert('That '+(feedUrl?'feed':'file')+' looks empty — it needs a header row plus data rows.');return;}
+  var hasHeader=rows[0].some(function(c){return /[A-Za-z]{2,}/.test(c);});
+  var header=hasHeader?rows[0]:rows[0].map(function(_,i){return 'column '+(i+1);});
+  var map=bcColGuess(header);
+  _stnPending={rows:hasHeader?rows.slice(1):rows,header:header,fname:fname||'',
+    map:map,units:stnUnitGuess(header,map),feedUrl:feedUrl||null,hasHeader:hasHeader};
+  document.getElementById('stn-fname').textContent=(feedUrl?'🔌 ':'📄 ')+(fname||'data')+' — '+_stnPending.rows.length+' data rows'+(feedUrl?' · this becomes a LIVE feed once the mapping is saved':'');
+  var sel=document.getElementById('stn-loc');
+  sel.innerHTML=locs.map(function(l){
+    return '<option value="'+l.id+'"'+(l.id===state.activeLoc?' selected':'')+'>📍 '+esc(l.name)+'</option>';
+  }).join('');
+  stnMapRender();
+  mOpen('m-stn');
+  stnPreview();
+}
+function stnMapRender(){
+  if(!_stnPending)return;
+  var P=_stnPending;
+  document.getElementById('stn-map').innerHTML=STN_FIELDS.map(function(f){
+    var colSel='<select onchange="stnMapSet(\''+f.k+'\',this.value)"><option value="-1">—</option>'
+      +P.header.map(function(h,i){
+        return '<option value="'+i+'"'+(P.map[f.k]===i?' selected':'')+'>'+esc(String(h).slice(0,40))+'</option>';
+      }).join('')+'</select>';
+    var unitSel=f.units?'<select onchange="stnUnitSet(\''+f.k+'\',this.value)">'
+      +f.units.map(function(u){
+        return '<option value="'+u[0]+'"'+(P.units[f.k]===u[0]?' selected':'')+'>'+esc(u[1])+'</option>';
+      }).join('')+'</select>':'<span></span>';
+    return '<label class="fl">'+esc(f.label)+'</label>'+colSel+unitSel;
+  }).join('');
+}
+function stnMapSet(k,v){if(_stnPending){_stnPending.map[k]=parseInt(v,10);stnPreview();}}
+function stnUnitSet(k,v){if(_stnPending){_stnPending.units[k]=v;stnPreview();}}
+function stnParseCheck(){
+  var P=_stnPending;if(!P)return null;
+  if(P.map.dt<0&&P.map.date<0)return {err:'Pick the date/time column (or a date column).'};
+  if(P.map.temp<0)return {err:'Pick the temperature column — the model can\'t run without it.'};
+  return bcStnHours(P.rows,P.map,P.units);
+}
+function stnPreview(){
+  var noteEl=document.getElementById('stn-parsenote'),prevEl=document.getElementById('stn-prev');
+  var res=stnParseCheck();
+  if(!res)return;
+  if(res.err){noteEl.innerHTML='⚠ '+esc(res.err);prevEl.innerHTML='';return;}
+  var hs=res.hours;
+  if(!hs.length){noteEl.innerHTML='⚠ No readable date/time + temperature rows — check the column picks above (dates are read as month/day/year).';prevEl.innerHTML='';return;}
+  var lwTxt={flag:'wet/dry sensor',scale:'0–10 sensor',minutes:'minutes-wet sensor',none:'none — estimated from RH + rain'}[res.lwMode]||res.lwMode;
+  noteEl.innerHTML='✓ <b>'+hs.length+' hours</b> parsed · '+esc(hs[0].t.replace('T',' '))+' → '+esc(hs[hs.length-1].t.replace('T',' '))
+    +' · leaf wetness: '+esc(lwTxt)+(res.bad?' · <span style="color:var(--bad);">'+res.bad+' unreadable row'+(res.bad===1?'':'s')+' skipped</span>':'');
+  var head='<tr><th>Hour</th><th>°F</th><th>RH%</th><th>Rain"</th><th>mph</th><th>Leaf wetness</th></tr>';
+  prevEl.innerHTML='<table class="prev">'+head+hs.slice(0,5).map(function(h){
+    return '<tr><td>'+esc(h.t.replace('T',' '))+'</td><td>'+(h.temp==null?'—':h.temp)+'</td><td>'+(h.rh==null?'—':h.rh)+'</td>'
+      +'<td>'+h.rain+'</td><td>'+(h.wind==null?'—':h.wind)+'</td><td>'+(h.lwObs==null?'—':h.lwObs+'/10')+'</td></tr>';
+  }).join('')+'</table>';
+}
+function stnImport(){
+  var res=stnParseCheck();
+  if(!res)return;
+  if(res.err){alert(res.err);return;}
+  /* feed mode: save the URL + mapping on the location and let the API
+     refresher take over — the cache accumulates history call by call */
+  if(_stnPending.feedUrl){
+    if(res.hours.length<3){alert('Only '+res.hours.length+' readable hours in the feed — check the column picks.');return;}
+    var l=locs.find(function(x){return x.id===(document.getElementById('stn-loc').value||state.activeLoc);})||activeLoc();
+    if(!l)return;
+    l.api={kind:'feed',url:_stnPending.feedUrl,name:'data feed',
+      map:_stnPending.map,units:_stnPending.units,hasHeader:_stnPending.hasHeader,
+      header:_stnPending.hasHeader?_stnPending.header.map(String):null};
+    bcSaveK(BCK.locs,locs);
+    try{localStorage.removeItem(apiKey(l.id));}catch(e){}
+    _apiMergeCache(l.id,_apiSig(l.api),res.hours.map(function(h){h.api=true;return h;}),res.lwMode&&res.lwMode!=='none');
+    _apiCache=null;
+    mClose('m-stn');_stnPending=null;
+    apiRender();renderAll();
+    toast('🔌 Feed connected — '+res.hours.length+' hours in, refreshing automatically from now on');
+    return;
+  }
+  if(res.hours.length<24){alert('Only '+res.hours.length+' readable hours — need at least a full day to be useful. Check the column picks (dates are read as month/day/year).');return;}
+  var locId=document.getElementById('stn-loc').value||state.activeLoc;
+  if(!locs.some(function(l){return l.id===locId;}))locId=state.activeLoc;
+  if(!stnSave(locId,res,_stnPending.fname))return; /* red banner already up */
+  mClose('m-stn');_stnPending=null;
+  stnRender();renderAll();
+  toast('📡 '+res.hours.length+' hours imported — your data now overrides Open-Meteo where it applies');
+}
+/* a small file in exactly the layout the mapper reads best — for matching
+   a station export against, or as a hand-fill template */
+function stnExample(){
+  var rows=[['timestamp','temp F','RH %','rain in','wind mph','leaf wetness minutes']];
+  var d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-1);
+  var vals=[[62,96,0,3,60],[61,97,0.02,2,60],[64,90,0,4,25],[71,72,0,6,0]];
+  for(var h=0;h<4;h++){
+    var t=new Date(d.getTime()+h*3600000);
+    rows.push([t.getFullYear()+'-'+('0'+(t.getMonth()+1)).slice(-2)+'-'+('0'+t.getDate()).slice(-2)
+      +' '+('0'+t.getHours()).slice(-2)+':00'].concat(vals[h]));
+  }
+  dlText('BlightCast_example_weather.csv',bcCsv(rows));
+  toast('Example downloaded — your file just needs the same idea: header row + one line per hour');
+}
+function stnClear(locId){
+  var l=locs.find(function(x){return x.id===locId;});
+  if(!confirm('Remove the imported weather data for "'+(l?l.name:'?')+'"? BlightCast goes back to Open-Meteo alone there.'))return;
+  try{localStorage.removeItem('blightcast_stn_'+locId);}catch(e){}
+  stnRender();renderAll();
+}
+function stnRender(){
+  var box=document.getElementById('stn-status');if(!box)return;
+  var items=[];
+  locs.forEach(function(l){
+    var b=stnLoad(l.id);if(!b||!b.hours||!b.hours.length)return;
+    var n=b.hours.length,first=b.hours[0][0].slice(0,10),last=b.hours[n-1][0].slice(0,10);
+    var lwTxt={flag:'wet/dry sensor',scale:'0–10 sensor',minutes:'minutes-wet sensor',none:'none (estimated)'}[b.lwMode]||'—';
+    items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b><small>'+n+' hours · '+first+' → '+last
+      +' · leaf wetness: '+lwTxt+(b.fname?' · '+esc(b.fname):'')+'</small></div>'
+      +'<button class="sbtn warn" onclick="stnClear(\''+l.id+'\')">✕ remove</button></div>');
+  });
+  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">None imported — Open-Meteo covers everything.</div>';
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   👻 Last-year overlay — Open-Meteo ARCHIVE for the same window last year
+   ════════════════════════════════════════════════════════════════════════ */
+var _lyCache=null; /* {locId,start,end,hours:[[t,temp,rh,rain,wind,isDay]]} */
+function lyToggle(){
+  state.lastYear=!state.lastYear;bcSaveK(BCK.state,state);
+  if(state.lastYear)lyEnsure(function(){renderChart();});
+  else renderChart();
+}
+function lyEnsure(cb){
+  var l=activeLoc();
+  if(!l||!hoursCache.length){cb();return;}
+  function shift(d){
+    var x=(parseInt(d.slice(0,4),10)-1)+d.slice(4);
+    return x.slice(5)==='02-29'?x.slice(0,5)+'02-28':x;
+  }
+  var start=shift(hoursCache[0].date),end=shift(hoursCache[hoursCache.length-1].date);
+  if(_lyCache&&_lyCache.locId===l.id&&_lyCache.start===start&&_lyCache.end===end){cb();return;}
+  var mk='blightcast_ly_'+l.id;
+  try{
+    var c=JSON.parse(localStorage.getItem(mk)||'null');
+    if(c&&c.start===start&&c.end===end&&c.hours){_lyCache={locId:l.id,start:start,end:end,hours:c.hours};cb();return;}
+  }catch(e){}
+  fetch('https://archive-api.open-meteo.com/v1/archive?latitude='+l.lat+'&longitude='+l.lon
+    +'&hourly=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,is_day'
+    +'&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch'
+    +'&start_date='+start+'&end_date='+end+'&timezone=auto')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d&&d.hourly&&d.hourly.time&&!d.hourly.is_day) /* belt + braces */
+        d.hourly.is_day=d.hourly.time.map(function(t){var h=parseInt(t.slice(11,13),10);return h>=7&&h<=19?1:0;});
+      if(d&&d.hourly&&!d.hourly.dew_point_2m&&d.hourly.time)
+        d.hourly.dew_point_2m=d.hourly.time.map(function(){return null;});
+      var hrs=bcHours(d).map(function(h){return [h.t,h.temp,h.rh,h.rain,h.wind,h.isDay?1:0];});
+      if(hrs.length){
+        _lyCache={locId:l.id,start:start,end:end,hours:hrs};
+        try{localStorage.setItem(mk,JSON.stringify({at:Date.now(),start:start,end:end,hours:hrs}));}catch(e2){}
+      } else toast('Last-year weather isn\'t available for that spot yet');
+      cb();
+    })
+    .catch(function(){toast('Couldn\'t reach the weather archive — try again later');cb();});
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   🔗 Setup share-links — locations + boxwood types + alert level in a URL
+   ════════════════════════════════════════════════════════════════════════ */
+function shareLink(){
+  if(!locs.length){toast('Add a 📍 location first — the link carries your setup');return;}
+  var payload={v:1,thr:state.threshold,rh:state.rhWet,lw:state.lwWet,
+    locs:locs.map(function(l){
+      var o={name:l.name,lat:l.lat,lon:l.lon,susc:locSuscOf(l)};
+      if(parseInt(l.thr,10)>0)o.thr=parseInt(l.thr,10);
+      if(l.newa&&l.newa.sid)o.newa={sid:String(l.newa.sid),name:String(l.newa.name||''),net:String(l.newa.net||'')};
+      return o;
+    })};
+  var base=(typeof location!=='undefined'&&/^https?:$/.test(location.protocol))
+    ?location.href.split('#')[0]:'BlightCast.html';
+  var url=base+'#s='+bcShareEncode(payload);
+  var done=function(){document.getElementById('back-note').textContent='🔗 Link copied — send it any way you like. It carries your locations, boxwood types and alert level (never your spray log or imported weather).';toast('Setup link copied');};
+  try{
+    if(typeof navigator!=='undefined'&&navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(done,function(){prompt('Copy this link:',url);});
+      return;
+    }
+  }catch(e){}
+  prompt('Copy this link:',url);
+}
+function shareApply(){
+  if(typeof location==='undefined')return;
+  var m=String(location.hash||'').match(/[#&]s=([A-Za-z0-9\-_]+)/);
+  if(!m)return;
+  try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
+  var p=bcShareDecode(m[1]);
+  if(!p||!Array.isArray(p.locs)||!p.locs.length)return;
+  var names=p.locs.map(function(x){return x&&x.name?String(x.name):'?';}).join(', ');
+  if(!confirm('This link carries a BlightCast setup:\n\n📍 '+names+'\n🔔 alert at '+(parseInt(p.thr,10)||56)+' DH\n\nAdd it to this browser? (Your spray log and anything already here are kept.)'))return;
+  var added=0;
+  p.locs.forEach(function(pl,i){
+    if(!pl||typeof pl.lat!=='number'||typeof pl.lon!=='number')return;
+    if(pl.lat<-90||pl.lat>90||pl.lon<-180||pl.lon>180)return;
+    var dup=locs.some(function(l){return Math.abs(l.lat-pl.lat)<0.001&&Math.abs(l.lon-pl.lon)<0.001;});
+    if(dup)return;
+    var nl={id:'l_'+Date.now().toString(36)+'_'+i,name:String(pl.name||'Shared spot').slice(0,80),
+      lat:pl.lat,lon:pl.lon,susc:BC_SUSC[pl.susc]?pl.susc:'high'};
+    var pthr=parseInt(pl.thr,10);
+    if(pthr>0&&pthr<=5000)nl.thr=pthr;
+    if(pl.newa&&typeof pl.newa.sid==='string'&&/^[\w\- ]{2,40}$/.test(pl.newa.sid))
+      nl.newa={sid:pl.newa.sid,name:String(pl.newa.name||'station').slice(0,60),net:String(pl.newa.net||'').slice(0,20)};
+    locs.push(nl);
+    added++;
+  });
+  var thr=parseInt(p.thr,10);if(thr>0&&thr<=5000)state.threshold=thr;
+  var rh=parseInt(p.rh,10);if(rh)state.rhWet=Math.min(99,Math.max(80,rh));
+  var lw=parseInt(p.lw,10);if(lw)state.lwWet=Math.min(10,Math.max(1,lw));
+  if(!state.activeLoc&&locs[0])state.activeLoc=locs[0].id;
+  bcSaveK(BCK.locs,locs);bcSaveK(BCK.state,state);
+  toast(added?('🔗 Shared setup added — '+added+' location'+(added===1?'':'s')):'🔗 Settings applied (locations were already here)');
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   📤 Spray log → a shared Google Sheet (Form bridge, like SprayCast's)
+   ════════════════════════════════════════════════════════════════════════ */
+function bcSheetCfg(){return bcLoadK('blightcast_sheetform_v1',null);}
+function bcSheetConnect(){
+  var p=bcFormParse(document.getElementById('bgs-link').value);
+  if(p.err){alert(p.err);return;}
+  var cfg={formId:p.formId,fields:p.fields,at:Date.now()};
+  var old=bcSheetCfg();
+  if(old&&old.sheetUrl)cfg.sheetUrl=old.sheetUrl;
+  bcSaveK('blightcast_sheetform_v1',cfg);
+  document.getElementById('bgs-link').value='';
+  bcSheetRender();
+  toast('📤 Connected — sending a test row now; open your sheet to confirm it landed');
+  bcSheetTest();
+}
+function bcSheetDisconnect(){
+  if(!confirm('Disconnect the Google Sheet? (Nothing already sent is removed; new log entries just stay in this browser.)'))return;
+  try{localStorage.removeItem('blightcast_sheetform_v1');}catch(e){}
+  bcSheetRender();
+}
+function bcSheetUrl(){
+  var cfg=bcSheetCfg();if(!cfg)return;
+  var u=prompt('Optional: paste the link to the responses SHEET itself (just for the "Open the sheet" button here):',cfg.sheetUrl||'');
+  if(u==null)return;
+  u=u.trim();
+  if(u&&!/^https?:\/\//i.test(u))u='https://'+u;
+  cfg.sheetUrl=u;bcSaveK('blightcast_sheetform_v1',cfg);bcSheetRender();
+}
+function bcSheetTest(){
+  bcSheetSend({date:localISO(),name:'TEST — connection check, ignore',days:7,frac:'',locId:state.activeLoc,dhAt:null},'test');
+}
+function bcSheetTestTab(){
+  var cfg=bcSheetCfg();if(!cfg)return;
+  var qs=bcFormBody(cfg.fields,_bcSheetVals({date:localISO(),name:'TEST — visible check',days:7,frac:'',locId:state.activeLoc,dhAt:null},'test'),{dateISO:localISO()});
+  try{window.open('https://docs.google.com/forms/d/e/'+cfg.formId+'/viewform?usp=pp_url&'+qs,'_blank');}catch(e){}
+}
+function _bcSheetVals(s,status){
+  return {date:s.date,name:s.name||'Protective spray',days:s.days!=null?s.days:'',frac:s.frac||'',
+    loc:locName(s.locId)==='?'?(activeLoc()?activeLoc().name:''):locName(s.locId),
+    notes:(s.dhAt!=null?('went on at '+fmtDH(s.dhAt)+' DH'+(s.bandAt?' ('+s.bandAt+')':'')):''),
+    status:status||'applied',dh:s.dhAt!=null?s.dhAt:''};
+}
+function bcSheetSend(s,status){
+  var cfg=bcSheetCfg();
+  if(!cfg||!cfg.formId)return;
+  var body=bcFormBody(cfg.fields,_bcSheetVals(s,status),{dateISO:s.date})+'&fvv=1&pageHistory=0';
+  try{
+    fetch('https://docs.google.com/forms/d/e/'+cfg.formId+'/formResponse',
+      {method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+      .then(function(){},function(){toast('⚠ Couldn\'t reach Google — that entry was NOT written to the sheet');});
+  }catch(e){}
+}
+function bcSheetRender(){
+  var box=document.getElementById('bgs-status');if(!box)return;
+  var cfg=bcSheetCfg();
+  if(!cfg){box.innerHTML='<div class="li" style="border:none;color:var(--txt2);">Not connected.</div>';return;}
+  box.innerHTML='<div class="li" style="flex-wrap:wrap;"><div class="grow"><b>📤 Connected</b><small>new spray-log entries (and removals) flow to the sheet · set up '
+    +new Date(cfg.at).toLocaleDateString()+'</small></div>'
+    +((cfg.sheetUrl&&/^https?:\/\//i.test(cfg.sheetUrl))?'<a class="sbtn" href="'+esc(cfg.sheetUrl)+'" target="_blank" rel="noopener">Open the sheet →</a>':'<button class="sbtn" onclick="bcSheetUrl()">＋ sheet link</button>')
+    +'<button class="sbtn" onclick="bcSheetTest()" title="Sends one obvious TEST row invisibly — check it appears in the sheet">🧪 Test row</button>'
+    +'<button class="sbtn" onclick="bcSheetTestTab()" title="Opens the form pre-filled in a new tab — press Submit there and Google SHOWS any problem">🔎 Debug in a tab</button>'
+    +'<button class="sbtn warn" onclick="bcSheetDisconnect()">✕</button></div>'
+    +'<div class="note" style="margin-top:6px;"><b>Rows not landing?</b> ① the form must be <b>Published</b> (top-right button — the #1 miss) ·'
+    +' ② Settings → Responses → Collect email addresses OFF and Limit-to-1-response OFF ·'
+    +' ③ no question marked Required · ④ rows land on the sheet\'s <b>"Form Responses" tab</b>.</div>';
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Backup / import
+   ════════════════════════════════════════════════════════════════════════ */
+function backExport(){
+  var stn={};
+  locs.forEach(function(l){var b=stnLoad(l.id);if(b)stn[l.id]=b;});
+  var data={app:'BlightCast',v:3,exported:new Date().toISOString(),
+    locs:locs,state:state,sprays:sprays,prods:prods,stn:stn};
+  var gs=bcSheetCfg();if(gs)data.sheetform=gs; /* a coworker who imports writes to the same sheet */
+  var b=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='BlightCast_backup_'+localISO()+'.json';a.click();
+  document.getElementById('back-note').textContent='Exported '+new Date().toLocaleString()+' — keep the file somewhere safe, or send it to a coworker.';
+}
+function backImport(inp){
+  var f=inp.files&&inp.files[0];if(!f)return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    try{
+      var d=JSON.parse(rd.result);
+      if(!d||d.app!=='BlightCast'||!Array.isArray(d.locs))throw new Error('not a BlightCast file');
+      if(!confirm('Import this backup? It REPLACES the locations, settings, products and spray log in this browser.'))return;
+      locs=d.locs;state=d.state||state;sprays=d.sprays||[];prods=d.prods||[];
+      if(!state.alertSigs)state.alertSigs={};
+      bcSaveK(BCK.locs,locs);bcSaveK(BCK.state,state);bcSaveK(BCK.sprays,sprays);bcSaveK(BCK.prods,prods);
+      if(d.stn)Object.keys(d.stn).forEach(function(id){
+        if(locs.some(function(l){return l.id===id;}))bcSaveK('blightcast_stn_'+id,d.stn[id]);
+      });
+      if(d.sheetform&&d.sheetform.formId&&!bcSheetCfg())bcSaveK('blightcast_sheetform_v1',d.sheetform);
+      wxData=null;locRenderList();stnRender();setRender();prodRenderList();bellRender();renderThr();renderAll();
+      document.getElementById('back-note').textContent='Imported — '+locs.length+' location(s).';
+    }catch(e){alert('That file could not be read as a BlightCast backup ('+e.message+').');}
+    inp.value='';
+  };
+  rd.readAsText(f);
+}
+function backRender(){}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Init
+   ════════════════════════════════════════════════════════════════════════ */
+/* published-copy extras (GitHub Pages): the installable-app layer runs
+   ONLY on https — double-clicked files and the farm-LAN copy skip it */
+try{
+  if(typeof location!=='undefined'&&location.protocol==='https:'){
+    var _mf=document.createElement('link');_mf.rel='manifest';_mf.href='manifest.webmanifest';
+    (document.head||document.documentElement).appendChild(_mf);
+    if(navigator.serviceWorker)navigator.serviceWorker.register('./sw.js').catch(function(){});
+  }
+}catch(e){}
+shareApply();     /* a #s= setup link adds its locations before first render */
+renderThr();
+renderAll();
+/* refresh the forecast every 30 min while the page is open */
+setInterval(function(){if(activeLoc())renderAll();},30*60000);
+</script>
+</body>
+</html>
