@@ -127,6 +127,13 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
 /* ── phones (Caryn field test 08-10): bigger tap targets, no iOS zoom-on-
    focus, sheet-style modals, stacked forms ── */
 @media(max-width:640px){
+  /* the page must NEVER scroll sideways — wide things scroll inside their
+     own wrappers. Column-flex children need min-width:0 or their intrinsic
+     content width (the long alert-level select!) drags the page wide. */
+  html,body{overflow-x:hidden;}
+  .main,.main .page,.page>*,.panel,.subbar>*{min-width:0;max-width:100%;}
+  select,select.pill,select.inp{max-width:100%;}
+  #thr-sel{flex:1 1 100%;}   /* the alert level gets its own full-width row */
   .hdr{padding:8px 10px;gap:8px;}
   .hdr h1{font-size:16px;}
   .hdr .tag{display:none;}
@@ -147,6 +154,11 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   .cmpchip{min-width:130px;}
   .mapg{grid-template-columns:1fr auto;gap:6px;}
   .days{grid-template-columns:repeat(2,minmax(0,1fr));}
+  /* phone readability: helper text and list sublines up a step */
+  .note{font-size:12.5px;}
+  .li{font-size:13.5px;}
+  .li small{font-size:12px;}
+  .statlines{font-size:13.5px;}
 }
 @media(max-width:520px){.main{padding:10px 6px;}}
 </style>
@@ -436,7 +448,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.10 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.11 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
