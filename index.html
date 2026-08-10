@@ -216,6 +216,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
     <div class="panel" id="chart-panel" style="display:none;">
       <div class="wwh">📈 Accumulated infection risk
         <span style="display:flex;gap:8px;align-items:center;">
+          <button class="sbtn" onclick="bigChartOpen()" title="Open the chart FULL SCREEN — on a phone held upright it rotates sideways by itself, so you get a big landscape graph without touching your rotation lock">⛶ Big</button>
           <button class="sbtn" id="ly-btn" onclick="lyToggle()" title="Overlay the same weeks LAST YEAR (from the Open-Meteo weather archive) as a gray dashed line — see whether this season's blight pressure is running early or late">👻 Last year</button>
           <button class="sbtn" onclick="chartSnapshot()" title="Save the chart as a picture (PNG) — with the location, current risk and credits on it, ready to text or email">📸 Snapshot</button>
           <button class="sbtn" onclick="riskCsv()" title="Download the daily risk history as a spreadsheet (opens in Excel)">⬇ Daily</button>
@@ -467,7 +468,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.11 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.12 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -522,6 +523,12 @@ built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
     <button class="btn" onclick="mClose('m-stn')">Cancel</button>
   </div>
 </div></div>
+
+<!-- ── ⛶ full-screen chart (auto-landscape on portrait phones) ────────── -->
+<div id="bigchart" style="display:none;position:fixed;inset:0;background:rgba(10,22,12,.96);z-index:3000;">
+  <div id="bigchart-inner"></div>
+  <button onclick="bigChartClose()" style="position:fixed;top:10px;right:10px;z-index:3001;font:inherit;font-size:15px;font-weight:800;padding:9px 14px;border-radius:9px;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.45);color:#fff;cursor:pointer;">✕</button>
+</div>
 
 <div class="banner" id="save-banner">⚠ SAVE FAILED — your browser storage may be full or blocked. Export a backup NOW.</div>
 <div class="toast" id="toast"></div>
@@ -1938,6 +1945,47 @@ function bcHourlyCsv(){
   var nm=activeLoc()?activeLoc().name.replace(/[^\w]+/g,'_'):'';
   dlText('BlightCast_hourly_'+nm+'_'+localISO()+'.csv',bcCsv(rows));
   toast('Hourly record downloaded ('+(rows.length-1)+' hours) — opens in Excel');
+}
+/* ── ⛶ full-screen chart: an enlarged copy of the live SVG. On a phone
+   held upright the chart is CSS-rotated 90° (landscape reading without
+   touching the rotation lock); a truly-landscape viewport shows it
+   straight. Re-renders on resize/orientation change. ── */
+function bigChartOpen(){
+  if(!document.getElementById('chart-svg')||!runCache.length){toast('No chart yet — add a 📍 location first');return;}
+  document.getElementById('bigchart').style.display='block';
+  bigChartRender();
+  try{window.addEventListener('resize',bigChartRender);}catch(e){}
+}
+function bigChartClose(){
+  document.getElementById('bigchart').style.display='none';
+  try{window.removeEventListener('resize',bigChartRender);}catch(e){}
+}
+function bigChartRender(){
+  var box=document.getElementById('bigchart');
+  if(!box||box.style.display==='none')return;
+  var svg=document.getElementById('chart-svg');if(!svg)return;
+  var vw=(typeof window!=='undefined'&&window.innerWidth)||800;
+  var vh=(typeof window!=='undefined'&&window.innerHeight)||600;
+  var portrait=vh>vw;
+  var W=portrait?vh:vw,H=portrait?vw:vh;      /* the landscape canvas */
+  var clone=svg.cloneNode(true);
+  try{
+    var cr=clone.querySelector('#ch-cross');if(cr)cr.innerHTML='';
+    var hit=clone.querySelector('#ch-hit');if(hit&&hit.parentNode)hit.parentNode.removeChild(hit);
+  }catch(e){}
+  try{clone.removeAttribute('id');}catch(e2){}
+  var ah=Math.min(H-56,(W-28)*330/1100);
+  var aw=ah*1100/330;
+  try{clone.setAttribute('width',aw);clone.setAttribute('height',ah);}catch(e3){}
+  var inner=document.getElementById('bigchart-inner');
+  inner.innerHTML='';
+  try{inner.appendChild(clone);}catch(e4){}
+  var base='position:absolute;display:flex;align-items:center;justify-content:center;background:#fff;';
+  if(portrait){
+    inner.style.cssText=base+'left:0;top:0;width:'+vh+'px;height:'+vw+'px;transform-origin:top left;transform:rotate(90deg) translateY(-100%);';
+  } else {
+    inner.style.cssText=base+'inset:0;width:'+vw+'px;height:'+vh+'px;';
+  }
 }
 /* 📸 chart snapshot — a self-contained shareable PNG: header (location,
    current DH + level, alert level, timestamp) + the live SVG + model credit */
