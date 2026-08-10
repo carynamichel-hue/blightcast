@@ -341,7 +341,10 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
       <div class="wwh">📡 Real station data <span class="note" style="font-weight:400;">(optional — sharpens the model)</span></div>
       <div class="note">BlightCast normally runs on Open-Meteo's modeled weather for your exact spot. Real station readings
       <b>override Open-Meteo for the hours they cover</b> — and a real <b>leaf-wetness sensor is used by the model directly</b>,
-      which beats estimating wetness from humidity. Open-Meteo still fills any gaps plus the 7-day forecast. Two ways in:</div>
+      which beats estimating wetness from humidity. Open-Meteo still fills any gaps plus the 7-day forecast.
+      <b>Everything here is PER LOCATION</b> — each of your locations can have its own station, its own connection, its own
+      imports (they never share). The connect buttons below act on the location that's <b>active</b> in the top bar; the lists
+      show every location's setup, with one-tap switches.</div>
 
       <label class="fl" style="margin-top:12px;">Option A — 🛰 link a NEWA / partner-network station (automatic)</label>
       <div class="note">If there's a station near you on <a href="https://newa.cornell.edu" target="_blank" rel="noopener">NEWA</a>
@@ -468,7 +471,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.12 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.13 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -2159,15 +2162,22 @@ function newaRender(){
   var box=document.getElementById('newa-status');if(!box)return;
   var items=[];
   locs.forEach(function(l){
-    if(!l.newa)return;
-    var c=bcLoadK(newaKey(l.id),null);
-    var thru=c&&c.hours&&c.hours.length?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
-    var lw=c?(c.lwet?'leaf wetness ✓ (sensor)':'no leaf-wetness sensor — wetness estimated'):'';
-    items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🛰 '+esc(l.newa.name)
-      +'<small>'+esc(newaNetName(l.newa.net))+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
-      +'<button class="sbtn warn" onclick="newaUnlink(\''+l.id+'\')">✕ unlink</button></div>');
+    if(l.newa){
+      var c=bcLoadK(newaKey(l.id),null);
+      var thru=c&&c.hours&&c.hours.length?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
+      var lw=c?(c.lwet?'leaf wetness ✓ (sensor)':'no leaf-wetness sensor — wetness estimated'):'';
+      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🛰 '+esc(l.newa.name)
+        +'<small>'+esc(newaNetName(l.newa.net))+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
+        +'<button class="sbtn warn" onclick="newaUnlink(\''+l.id+'\')">✕ unlink</button></div>');
+    } else {
+      /* every location shows here — a different station per location is the
+         POINT; one tap makes that location active and starts the search */
+      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b><small>no station linked'+(l.id===state.activeLoc?' — it\'s active: 🔍 search below':'')+'</small></div>'
+        +(l.id===state.activeLoc?'':'<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\');newaFind()">🔍 Find its stations</button>'));
+      items[items.length-1]+='</div>';
+    }
   });
-  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">No station linked — 🔍 search below (free, no account).</div>';
+  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">Add a 📍 location first.</div>';
 }
 /* fetch a linked station's last 31 days; 60-min cache; offsetSec = the
    location's UTC offset (from its Open-Meteo reply) so the end date is
@@ -2321,16 +2331,21 @@ function apiRender(){
   var box=document.getElementById('api-status');if(!box)return;
   var items=[];
   locs.forEach(function(l){
-    if(!l.api)return;
-    var c=bcLoadK(apiKey(l.id),null);
-    var thru=(c&&c.hours&&c.hours.length)?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
-    var what=l.api.kind==='licor'?('LI-COR · logger '+l.api.device):('feed · '+String(l.api.url||'').replace(/^https?:\/\//,'').slice(0,40)+'…');
-    var lw=c?(c.lwet?'leaf wetness ✓':'no leaf-wetness data — estimated'):'';
-    items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🔌 '+esc(l.api.name||what)
-      +'<small>'+esc(what)+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
-      +'<button class="sbtn warn" onclick="apiUnlink(\''+l.id+'\')">✕ disconnect</button></div>');
+    if(l.api){
+      var c=bcLoadK(apiKey(l.id),null);
+      var thru=(c&&c.hours&&c.hours.length)?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
+      var what=l.api.kind==='licor'?('LI-COR · logger '+l.api.device):('feed · '+String(l.api.url||'').replace(/^https?:\/\//,'').slice(0,40)+'…');
+      var lw=c?(c.lwet?'leaf wetness ✓':'no leaf-wetness data — estimated'):'';
+      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b> — 🔌 '+esc(l.api.name||what)
+        +'<small>'+esc(what)+' · data through '+esc(thru)+(lw?' · '+lw:'')+'</small></div>'
+        +'<button class="sbtn warn" onclick="apiUnlink(\''+l.id+'\')">✕ disconnect</button></div>');
+    } else {
+      items.push('<div class="li"><div class="grow"><b>📍 '+esc(l.name)+'</b><small>nothing connected'+(l.id===state.activeLoc?' — it\'s active: use the buttons below':'')+'</small></div>'
+        +(l.id===state.activeLoc?'':'<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\');toast(\'📍 \'+activeLoc().name+\' is active — now connect below\')">→ set up this location</button>')
+        +'</div>');
+    }
   });
-  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">Nothing connected — the two buttons below are for stations with their own cloud service.</div>';
+  box.innerHTML=items.length?items.join(''):'<div class="li" style="border:none;color:var(--txt2);">Add a 📍 location first.</div>';
 }
 function apiUnlink(locId){
   var l=locs.find(function(x){return x.id===locId;});if(!l||!l.api)return;
