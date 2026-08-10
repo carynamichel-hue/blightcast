@@ -159,11 +159,12 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   .li{font-size:13.5px;}
   .li small{font-size:12px;}
   .statlines{font-size:13.5px;}
-  /* location rows: name line on top, controls (🌱 dropdown + buttons) wrap
-     to their own line instead of crushing/overflowing */
-  #loc-list .li{flex-wrap:wrap;}
-  #loc-list .li .grow{flex:1 1 100%;}
-  #loc-list .li select{max-width:calc(100% - 120px);}
+  /* location rows: three clean lines — name/coords, then the 🌱 dropdown
+     full-width, then the button group right-aligned (never scattered) */
+  #loc-list .locrow{flex-wrap:wrap;row-gap:6px;}
+  #loc-list .locrow .grow{flex:1 1 100%;}
+  #loc-list .locrow select{flex:1 1 100%;max-width:100%;}
+  #loc-list .locrow .locbtns{margin-left:auto;}
   /* header: title row, then the tabs as a clean 3-across bar */
   .hdr h1{flex:1;}
   .hdr .sp{display:none;}
@@ -474,7 +475,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.14 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.15 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -1304,11 +1305,12 @@ function locRenderList(){
       +Object.keys(BC_SUSC).map(function(k){
         return '<option value="'+k+'"'+(su===k?' selected':'')+'>🌱 '+esc(BC_SUSC[k].label)+'</option>';
       }).join('')+'</select>';
-    return '<div class="li"><div class="grow">'+(on?'📍 <b>':'')+esc(l.name)+(on?'</b> — active':'')+'<small>'+l.lat.toFixed(3)+', '+l.lon.toFixed(3)+'</small></div>'
+    return '<div class="li locrow"><div class="grow">'+(on?'📍 <b>':'')+esc(l.name)+(on?'</b> — active':'')+'<small>'+l.lat.toFixed(3)+', '+l.lon.toFixed(3)+'</small></div>'
       +sel
+      +'<span class="locbtns" style="display:flex;gap:6px;flex-wrap:nowrap;">'
       +'<button class="btn" onclick="locRename(\''+l.id+'\')" title="Rename / nickname">✎</button>'
       +(on?'':'<button class="btn" onclick="locUse(\''+l.id+'\')">Use</button>')
-      +'<button class="btn warn" onclick="locDel(\''+l.id+'\')">✕</button></div>';
+      +'<button class="btn warn" onclick="locDel(\''+l.id+'\')">✕</button></span></div>';
   }).join(''):'<div class="li">None yet — search above.</div>';
 }
 function renderLocChips(){
@@ -2169,27 +2171,29 @@ function srcRender(){
   box.innerHTML=locs.map(function(l){
     var active=l.id===state.activeLoc;
     var rows='';
-    var mk=function(html){return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12.5px;">'+html+'</div>';};
+    /* text wraps inside its own flexible span; the button is PINNED at the
+       right and never wraps to its own line */
+    var mk=function(text,btn){return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;"><span style="flex:1;min-width:0;">'+text+'</span>'+(btn||'')+'</div>';};
     var switchBtn='<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\')">→ make active to set up</button>';
     if(l.newa){
       var c=bcLoadK(newaKey(l.id),null);
       var thru=c&&c.hours&&c.hours.length?c.hours[c.hours.length-1][0].replace('T',' '):'fetching…';
-      rows+=mk('🛰 <b>'+esc(l.newa.name)+'</b> <span class="note">'+esc(newaNetName(l.newa.net))+' · through '+esc(thru)+(c&&c.lwet?' · leaf wetness ✓':'')+'</span>'
-        +'<button class="sbtn warn" onclick="newaUnlink(\''+l.id+'\')">✕</button>');
-    } else rows+=mk('<span class="note">🛰 no NEWA station'+(active?' — Option A below':'')+'</span>'
-        +(active?'':'<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\');newaFind()">🔍 link one</button>'));
+      rows+=mk('🛰 <b>'+esc(l.newa.name)+'</b> <span class="note">'+esc(newaNetName(l.newa.net))+' · through '+esc(thru)+(c&&c.lwet?' · leaf wetness ✓':'')+'</span>',
+        '<button class="sbtn warn" onclick="newaUnlink(\''+l.id+'\')">✕</button>');
+    } else rows+=mk('<span class="note">🛰 no NEWA station'+(active?' — Option A below':'')+'</span>',
+        active?'':'<button class="sbtn" onclick="locUse(\''+l.id+'\');bcNav(\'setup\');newaFind()">🔍 link one</button>');
     if(l.api){
       var ca=bcLoadK(apiKey(l.id),null);
       var thruA=(ca&&ca.hours&&ca.hours.length)?ca.hours[ca.hours.length-1][0].replace('T',' '):'fetching…';
       var what=l.api.kind==='licor'?('LI-COR logger '+l.api.device):'data feed';
-      rows+=mk('🔌 <b>'+esc(l.api.name||what)+'</b> <span class="note">'+esc(what)+' · through '+esc(thruA)+(ca&&ca.lwet?' · leaf wetness ✓':'')+'</span>'
-        +'<button class="sbtn warn" onclick="apiUnlink(\''+l.id+'\')">✕</button>');
+      rows+=mk('🔌 <b>'+esc(l.api.name||what)+'</b> <span class="note">'+esc(what)+' · through '+esc(thruA)+(ca&&ca.lwet?' · leaf wetness ✓':'')+'</span>',
+        '<button class="sbtn warn" onclick="apiUnlink(\''+l.id+'\')">✕</button>');
     } else rows+=mk('<span class="note">🔌 no station connection'+(active?' — Option B below':'')+'</span>');
     var b=stnLoad(l.id);
     if(b&&b.hours&&b.hours.length){
       var n=b.hours.length;
-      rows+=mk('📡 <b>'+n+' imported hours</b> <span class="note">'+b.hours[0][0].slice(0,10)+' → '+b.hours[n-1][0].slice(0,10)+(b.fname?' · '+esc(b.fname):'')+'</span>'
-        +'<button class="sbtn warn" onclick="stnClear(\''+l.id+'\')">✕</button>');
+      rows+=mk('📡 <b>'+n+' imported hours</b> <span class="note">'+b.hours[0][0].slice(0,10)+' → '+b.hours[n-1][0].slice(0,10)+(b.fname?' · '+esc(b.fname):'')+'</span>',
+        '<button class="sbtn warn" onclick="stnClear(\''+l.id+'\')">✕</button>');
     } else rows+=mk('<span class="note">📡 no imported file'+(active?' — Option C below':'')+'</span>');
     return '<div class="li" style="flex-direction:column;align-items:stretch;gap:5px;"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><b>📍 '+esc(l.name)+'</b>'
       +(active?'<span style="color:var(--acc);font-weight:700;font-size:12px;">active — the options below set THIS location up</span>':switchBtn)+'</div>'+rows+'</div>';
