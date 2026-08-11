@@ -227,8 +227,8 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
     <div class="panel" id="chart-panel" style="display:none;">
       <div class="wwh">📈 Accumulated infection risk
         <span style="display:flex;gap:8px;align-items:center;">
-          <button class="sbtn" onclick="bigChartOpen()" title="Open the chart FULL SCREEN — on a phone held upright it rotates sideways by itself, so you get a big landscape graph without touching your rotation lock">⛶ Big</button>
-          <button class="sbtn" id="ly-btn" onclick="lyToggle()" title="Overlay the same weeks LAST YEAR (from the Open-Meteo weather archive) as a gray dashed line — see whether this season's blight pressure is running early or late">👻 Last year</button>
+          <button class="sbtn" onclick="bigChartOpen()" title="Open the chart FULL SCREEN — on a phone held upright it rotates sideways by itself, so you get a big landscape graph without touching your rotation lock">⛶ Full screen</button>
+          <button class="sbtn" id="ly-btn" onclick="lyToggle()" title="Overlay the same weeks LAST YEAR (from the Open-Meteo weather archive) as a gray dashed line — see whether this season's blight pressure is running early or late">👻 vs last year</button>
           <button class="sbtn" onclick="chartSnapshot()" title="Save the chart as a picture (PNG) — with the location, current risk and credits on it, ready to text or email">📸 Snapshot</button>
           <button class="sbtn" onclick="riskCsv()" title="Download the daily risk history as a spreadsheet (opens in Excel)">⬇ Daily</button>
           <button class="sbtn" onclick="bcHourlyCsv()" title="Download the hour-by-hour record — temp, RH, rain, wind, leaf wetness (with its source), DH accrued and the running total (opens in Excel)">⬇ Hourly</button>
@@ -335,6 +335,10 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 
   <div class="page" id="page-setup" style="display:none;">
+    <div class="panel" id="setup-hello" style="display:none;background:#eef6ee;">
+      <div style="font-size:13.5px;line-height:1.55;"><b>Welcome — add your town below and you're running.</b><br>
+      Everything stays in this browser; nothing you enter is uploaded anywhere (details under ℹ About, bottom of this page).</div>
+    </div>
     <div class="panel">
       <div class="wwh">📍 Locations</div>
       <label class="fl">Find your town</label>
@@ -350,7 +354,8 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
     </div>
     <div class="panel">
       <div class="wwh">📡 Real station data <span class="note" style="font-weight:400;">(optional — sharpens the model)</span></div>
-      <div class="note">BlightCast normally runs on Open-Meteo's modeled weather for your exact spot. Real station readings
+      <div class="note"><b>You can skip this whole panel</b> — BlightCast works fine on its built-in weather.
+      BlightCast normally runs on Open-Meteo's modeled weather for your exact spot. Real station readings
       <b>override Open-Meteo for the hours they cover</b> — and a real <b>leaf-wetness sensor is used by the model directly</b>,
       which beats estimating wetness from humidity. Open-Meteo still fills any gaps plus the 7-day forecast.
       <b>Everything here is PER LOCATION</b> — each of your locations can have its own station, its own connection, its own
@@ -428,7 +433,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
       </div>
     </div>
     <div class="panel">
-      <div class="wwh">🔔 Alerts on this computer <button class="sbtn" id="bell-btn" onclick="bellToggle()">🔕 Alerts</button></div>
+      <div class="wwh">🔔 Alerts on this device <button class="sbtn" id="bell-btn" onclick="bellToggle()">🔕 Alerts</button></div>
       <div class="note">When ON, BlightCast chimes and pops a note whenever a <b>new</b> forecast crossing of your alert level appears —
       it works while the page is open. For reminders that reach you when BlightCast is closed, use the 📅 button on the
       re-spray recommendation: the calendar file carries its own 12-hour and 1-hour reminders into Outlook, Gmail or Apple Calendar.</div>
@@ -454,6 +459,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
     <div class="panel">
       <div class="wwh">💾 Backup &amp; sharing</div>
       <div class="note">Your data lives only in this browser. The backup file is also how you <b>share</b> your setup with a coworker — they import it on their computer.</div>
+      <div class="note" style="margin-top:6px;">📱 <b>Phone note:</b> iPhone/Safari can clear a site's saved data if you don't open it for a week or two — export a backup once you're set up, and open the app now and then. Adding it to your Home Screen (share button → Add to Home Screen) also helps protect it and lets it open offline.</div>
       <div class="row" style="margin-top:12px;">
         <button class="btn pri" onclick="backExport()">⬇ Export backup / share file</button>
         <label class="btn" style="margin:0;font-size:12.5px;">📂 Import a file<input type="file" accept=".json" style="display:none;" onchange="backImport(this)"></label>
@@ -465,7 +471,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
       <div class="wwh">ℹ About BlightCast</div>
       <div style="font-size:13px;line-height:1.55;">
       <p><b>Privacy, plainly:</b> there is no account, no install, and nothing you enter is uploaded anywhere. Your locations, settings,
-      spray log and any weather file you import are stored only in this browser on this computer (imported files are read right here in the
+      spray log and any weather file you import are stored only in this browser on this device (imported files are read right here in the
       browser). The only internet requests are to <b>Open-Meteo</b> (a free public weather service) for hourly weather, town search and the
       last-year archive — plus, only for sources you connect yourself in ⚙ Setup: <b>NEWA's</b> public station service at Cornell
       (newa.nrcc.cornell.edu / hrly.nrcc.cornell.edu), <b>LI-COR Cloud</b> (api.licor.cloud — your token goes only there, stored only in
@@ -480,7 +486,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.18 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.19 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -699,6 +705,7 @@ function bcProtectedUntil(sprays,locId,todayISO,hours){
         if(wISO<end){end=wISO;washed=true;}
       }
     }
+    if(s.date>todayISO)return;   /* a future-dated log is not protection TODAY (08-11) */
     if(end>=todayISO&&(!best||end>best.end))best={end:end,name:s.name||'',date:s.date,washed:washed};
   });
   return best;
@@ -889,6 +896,16 @@ function bcParseTs(dateS,timeS){
   if(roll)dt.setDate(dt.getDate()+1);
   return dt.getFullYear()+'-'+('0'+(dt.getMonth()+1)).slice(-2)+'-'+('0'+dt.getDate()).slice(-2)+'T'+('0'+dt.getHours()).slice(-2)+':00';
 }
+/* what an IANA zone's UTC offset was at a given instant (ms epoch) —
+   via Intl, so DST transitions come out right; null if the zone is bad */
+function bcZoneOffsetMs(zone,ms){
+  try{
+    var p=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date(ms));
+    var o={};p.forEach(function(x){o[x.type]=x.value;});
+    var hh=o.hour==='24'?'00':o.hour;
+    return Date.UTC(+o.year,+o.month-1,+o.day,+hh,+o.minute)-ms;
+  }catch(e){return null;}
+}
 /* data rows + column map + units → hourly records for the engine.
    Sub-hourly rows are aggregated per hour: temp/RH/wind mean, rain SUM,
    leaf wetness by detected mode (wet/dry flag · 0–10 scale · minutes wet).
@@ -897,7 +914,10 @@ function bcParseTs(dateS,timeS){
 function bcStnHours(rows,map,units){
   units=units||{};
   var acc={},order=[],bad=0,lwMax=0,hasLw=map.lw>=0;
-  function num(v){if(v==null)return null;v=String(v).trim().replace(/[^0-9.\-]/g,'');if(v===''||v==='-'||v==='.')return null;var n=parseFloat(v);return isNaN(n)?null:n;}
+  function num(v){if(v==null)return null;v=String(v).trim();
+    /* European decimal comma ("12,5") — stripping it read 125 (08-11) */
+    if(/^-?\d+,\d+$/.test(v))v=v.replace(',','.');
+    v=v.replace(/[^0-9.\-]/g,'');if(v===''||v==='-'||v==='.')return null;var n=parseFloat(v);return isNaN(n)?null:n;}
   for(var i=0;i<rows.length;i++){
     var r=rows[i];
     var ts=map.dt>=0?bcParseTs(r[map.dt],null):bcParseTs(map.date>=0?r[map.date]:null,map.time>=0?r[map.time]:null);
@@ -912,6 +932,11 @@ function bcStnHours(rows,map,units){
   }
   var lwMode=!hasLw?'none':(units.lw&&units.lw!=='auto')?units.lw:(lwMax<=1?'flag':lwMax<=10?'scale':'minutes');
   order.sort();
+  /* an hour whose rows carried NO numeric readings at all (station outage
+     writing timestamps with blank/"M" cells) must NOT become a temp:null
+     rain:0 record — it would override a good Open-Meteo hour with "dry,
+     no temp" and force a phantom reset. Let the hole fall through. */
+  order=order.filter(function(ts){var a=acc[ts];return a.tn||a.rhn||a.wn||a.lwn||a.rain>0;});
   var out=order.map(function(ts){
     var a=acc[ts];
     var temp=a.tn?a.temp/a.tn:null,rh=a.rhn?a.rh/a.rhn:null,wind=a.wn?a.wind/a.wn:null,rain=a.rain;
@@ -1008,10 +1033,16 @@ function bcNewaHours(reply){
     var lwObs=lw==null?null:Math.max(0,Math.min(10,Math.round(lw/6)));
     if(lwObs!=null)sawLwet=true;
     var rain=F.prcp===undefined?null:num(r[F.prcp]);
+    var temp=F.temp===undefined?null:num(r[F.temp]);
+    var wind=F.wspd===undefined?null:num(r[F.wspd]);
+    /* an outage row (all "M") must NOT become an hour record — it would
+       override a good Open-Meteo hour with "dry, no temp" and force a
+       phantom reset; let the hole fall through (08-11 review) */
+    if(temp==null&&rh==null&&rain==null&&wind==null&&lwObs==null)return;
     var hour=parseInt(t.slice(11,13),10);
     out.push({t:t,date:t.slice(0,10),hour:hour,month:parseInt(t.slice(5,7),10),
-      temp:F.temp===undefined?null:num(r[F.temp]),rh:rh,rain:rain==null?0:rain,
-      wind:F.wspd===undefined?null:num(r[F.wspd]),
+      temp:temp,rh:rh,rain:rain==null?0:rain,
+      wind:wind,
       lwObs:lwObs,isDay:hour>=7&&hour<=19,stn:true,newa:true});
   });
   out.sort(function(a,b){return a.t<b.t?-1:1;});
@@ -1116,10 +1147,13 @@ function bcLicorChannels(scanDev,picks){
    [ms,value] pairs; units convert per-stream from the reply's own units
    (°C→°F, mm→in, km/h·m/s→mph); leaf wetness % → 0–10. offsetSec = the
    location's UTC offset so hours land on station-local clock time. */
-function bcLicorHours(replies,picks,offsetSec){
+function bcLicorHours(replies,picks,offsetSec,zone){
   var acc={},sawLw=false;
   function toHour(ms){
-    var d=new Date(ms+(offsetSec||0)*1000);
+    /* an IANA zone labels each timestamp with the offset in force AT THAT
+       MOMENT — a fixed offset shifts pre-DST-transition hours by one */
+    var off=zone!=null?bcZoneOffsetMs(zone,ms):null;
+    var d=new Date(ms+(off!=null?off:(offsetSec||0)*1000));
     return d.getUTCFullYear()+'-'+('0'+(d.getUTCMonth()+1)).slice(-2)+'-'+('0'+d.getUTCDate()).slice(-2)+'T'+('0'+d.getUTCHours()).slice(-2)+':00';
   }
   (Array.isArray(replies)?replies:[replies]).forEach(function(rep){
@@ -1247,6 +1281,9 @@ function bcNav(tab){
   });
   if(tab==='setup'){locRenderList();stnRender();newaRender();apiRender();setRender();prodRenderList();bellRender();bcSheetRender();backRender();}
   if(tab==='model')renderBandTable();
+  /* the day strip can't measure/center itself while hidden (scrollWidth=0
+     under display:none) — rebuilt-while-away strips re-center on arrival */
+  if(tab==='risk'&&daysCache.length)renderDays();
 }
 function mOpen(id){document.getElementById(id).classList.add('op');}
 function mClose(id){document.getElementById(id).classList.remove('op');}
@@ -1315,6 +1352,8 @@ function locRename(id){
   l.name=nm;bcSaveK(BCK.locs,locs);locRenderList();renderAll();
 }
 function locRenderList(){
+  var hi=document.getElementById('setup-hello');
+  if(hi)hi.style.display=locs.length?'none':'';
   var box=document.getElementById('loc-list');
   box.innerHTML=locs.length?locs.map(function(l){
     var on=activeLoc()&&activeLoc().id===l.id,su=locSuscOf(l);
@@ -1500,7 +1539,7 @@ function renderSprays(){
   var mine=sprays.filter(function(s){return !s.locId||s.locId===state.activeLoc;})
     .sort(function(a,b){return a.date<b.date?1:-1;});
   box.innerHTML=mine.length?mine.map(function(s){
-    var eff=_sprayEff(s),active=eff.end>=todayLoc();
+    var eff=_sprayEff(s),active=s.date<=todayLoc()&&eff.end>=todayLoc();
     var washLine='';
     if(s.wash){
       var soFar=bcRainSince(hoursCache,s.date,nowTCache);
@@ -1514,7 +1553,7 @@ function renderSprays(){
       +washLine
       +(active?' · <b style="color:var(--acc);">active</b>':' · lapsed')+'</small></div>'
       +'<button class="sbtn warn" onclick="sprayDel(\''+s.id+'\')">✕</button></div>';
-  }).join(''):'<div class="li" style="border:none;color:var(--txt2);">Nothing logged yet.</div>';
+  }).join(''):'<div class="li" style="border:none;color:var(--txt2);">Nothing logged yet — after you apply a protective fungicide, 🧴 Log a spray (top bar) and the chart shades the protected window.</div>';
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -1614,7 +1653,7 @@ function renderAll(){
     _wxNoteBase=d?('weather '+(at?new Date(at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'')+' · '+l.name):'⚠ weather fetch failed';
     document.getElementById('wx-note').textContent=_wxNoteBase;
     newaFetchLoc(l,d?d.utc_offset_seconds:null,function(nh){
-      apiFetchLoc(l,d?d.utc_offset_seconds:null,function(ah){
+      apiFetchLoc(l,d,function(ah){
         if(!activeLoc()||activeLoc().id!==l.id)return;
         _newaCache={locId:l.id,hours:nh};
         _apiCache={locId:l.id,hours:ah};
@@ -1638,7 +1677,7 @@ function renderCompare(){
       if(!el)return;
       if(!d){el.innerHTML='📍 '+esc(l.name)+'<span class="note">⚠ no weather</span>';return;}
       newaFetchLoc(l,d.utc_offset_seconds,function(nh){
-      apiFetchLoc(l,d.utc_offset_seconds,function(ah){
+      apiFetchLoc(l,d,function(ah){
       var hrs=bcMergeHours(bcMergeHours(bcMergeHours(bcHours(d),nh),ah),stnExpand(stnLoad(l.id)));
       var run=bcRun(hrs,{rhWet:state.rhWet,lwWet:state.lwWet});
       if(!run.length){el.innerHTML='📍 '+esc(l.name)+'<span class="note">⚠ no weather</span>';return;}
@@ -1966,7 +2005,7 @@ function _shareFile(b,fname,mime){
 function dlText(fname,text,mime){
   /* leading BOM so Excel opens UTF-8 CSVs with accents intact */
   var b=new Blob(['\uFEFF'+text],{type:mime||'text/csv;charset=utf-8'});
-  if(_isPhone()&&_shareFile(b,fname,'text/csv'))return;
+  if(_isPhone()&&_shareFile(b,fname,(mime||'text/csv').split(';')[0]))return;
   _dlBlob(b,fname);
 }
 function sprayCsv(){
@@ -2338,8 +2377,11 @@ function _apiMergeCache(locId,sig,newHours,lwet){
 function _apiExpand(blob){
   return stnExpand(blob).map(function(h){h.api=true;return h;});
 }
-/* fetch a linked API's data; 60-min cache; incremental after the first pull */
-function apiFetchLoc(l,offsetSec,cb){
+/* fetch a linked API's data; 60-min cache; incremental after the first pull.
+   om = the location's Open-Meteo reply (for its utc offset AND IANA zone —
+   a fixed offset mislabels hours across DST transitions, 08-11 review) */
+function apiFetchLoc(l,om,cb){
+  var offsetSec=(om&&om.utc_offset_seconds)||null,zone=(om&&om.timezone)||null;
   if(!l||!l.api){cb([]);return;}
   var sig=_apiSig(l.api),cached=null;
   try{
@@ -2355,8 +2397,12 @@ function apiFetchLoc(l,offsetSec,cb){
       var lastT=cached.hours[cached.hours.length-1][0];
       /* lastT is STATION-LOCAL; parse as UTC then remove the offset — a
          plain Date() parse is browser-local and double-applies the offset,
-         leaving a permanent hour gap after every refresh (08-10 review) */
-      var ms=new Date(lastT+':00Z').getTime()-(offsetSec||0)*1000;
+         leaving a permanent hour gap after every refresh (08-10 review).
+         Use the zone's offset AT that time (DST); the 3-hour back-off
+         absorbs any residual transition edge. */
+      var guess=new Date(lastT+':00Z').getTime();
+      var zoff=zone!=null?bcZoneOffsetMs(zone,guess):null;
+      var ms=guess-(zoff!=null?zoff:(offsetSec||0)*1000);
       if(isFinite(ms)&&ms>startMs)startMs=ms-3*3600000;
     }
     var chans=l.api.channels&&l.api.channels.length?l.api.channels:[null];
@@ -2369,7 +2415,7 @@ function apiFetchLoc(l,offsetSec,cb){
     })).then(function(replies){
       replies=replies.filter(function(x){return x;});
       if(!replies.length){fail();return;}
-      var res=bcLicorHours(replies,{air:l.api.air,rain:l.api.rain,wind:l.api.wind,lw:l.api.lw},offsetSec);
+      var res=bcLicorHours(replies,{air:l.api.air,rain:l.api.rain,wind:l.api.wind,lw:l.api.lw},offsetSec,zone);
       var blob=_apiMergeCache(l.id,sig,res.hours,res.lwet||(cached&&cached.lwet));
       apiRender();
       cb(_apiExpand(blob));
@@ -2808,6 +2854,7 @@ function backExport(){
   var b=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});
   var a=document.createElement('a');a.href=URL.createObjectURL(b);
   a.download='BlightCast_backup_'+localISO()+'.json';a.click();
+  state.lastBackup=Date.now();bcSaveK(BCK.state,state);
   document.getElementById('back-note').textContent='Exported '+new Date().toLocaleString()+' — keep the file somewhere safe, or send it to a coworker.';
 }
 function backImport(inp){
@@ -2818,6 +2865,15 @@ function backImport(inp){
       var d=JSON.parse(rd.result);
       if(!d||d.app!=='BlightCast'||!Array.isArray(d.locs))throw new Error('not a BlightCast file');
       if(!confirm('Import this backup? It REPLACES the locations, settings, products and spray log in this browser.'))return;
+      /* clean up the per-location blobs of ids being replaced — otherwise
+         orphaned wx/stn/newa/api/ly caches pile up toward the storage cap */
+      var keep={};(d.locs||[]).forEach(function(x){if(x&&x.id)keep[x.id]=1;});
+      locs.forEach(function(x){
+        if(keep[x.id])return;
+        ['blightcast_wx_','blightcast_stn_','blightcast_ly_','blightcast_newa_','blightcast_api_'].forEach(function(p){
+          try{localStorage.removeItem(p+x.id);}catch(e3){}
+        });
+      });
       locs=d.locs;state=d.state||state;sprays=d.sprays||[];prods=d.prods||[];
       if(!state.alertSigs)state.alertSigs={};
       bcSaveK(BCK.locs,locs);bcSaveK(BCK.state,state);bcSaveK(BCK.sprays,sprays);bcSaveK(BCK.prods,prods);
@@ -2832,7 +2888,13 @@ function backImport(inp){
   };
   rd.readAsText(f);
 }
-function backRender(){}
+function backRender(){
+  var el=document.getElementById('back-note');
+  if(!el||el.textContent)return;   /* never clobber a fresher message */
+  el.textContent=state.lastBackup
+    ?'Last backup: '+new Date(state.lastBackup).toLocaleDateString()
+    :'No backup taken yet on this device.';
+}
 
 /* ════════════════════════════════════════════════════════════════════════
    Init
@@ -2848,7 +2910,14 @@ try{
 }catch(e){}
 shareApply();     /* a #s= setup link adds its locations before first render */
 renderThr();
+backRender();
+if(!locs.length)bcNav('setup');   /* first run lands where the setup happens */
 renderAll();
+/* a season of spray logs deserves a saved copy — nudge if none/old */
+try{
+  if(sprays.length&&(!state.lastBackup||Date.now()-state.lastBackup>14*86400000))
+    setTimeout(function(){toast('💾 Reminder: export a backup (⚙ Setup) — your spray log lives only in this browser');},2500);
+}catch(e){}
 /* refresh the forecast every 30 min while the page is open */
 setInterval(function(){if(activeLoc())renderAll();},30*60000);
 </script>
