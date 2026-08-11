@@ -480,6 +480,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
       Google Form/Sheet <b>you</b> set up. Tokens and feed links are never included in 🔗 setup share-links.</p>
       <p style="margin-top:8px;"><b>A model is a model:</b> BlightCast is planning help, not a diagnosis. It flags conditions favorable for
       infection assuming the pathogen is around — scouting and the product label always win. See the 📖 Model tab for assumptions and credits.</p>
+      <p style="margin-top:8px;">📖 New here, or handing this to the crew? The <a href="guide.html">how-to guide</a> walks through everything — the model in plain language, spray logging, station data and the sheet setup.</p>
       <p style="margin-top:8px;color:var(--txt2);">BlightCast is a small taste of the farm-management system built at Overdevest Nurseries —
       spray records, scouting, inventory, compliance and more. Curious? Ask Caryn.</p>
       </div>
@@ -487,7 +488,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.20 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.21 · <a href="guide.html">📖 how-to guide</a> · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -2853,8 +2854,10 @@ function backExport(){
     locs:locs,state:state,sprays:sprays,prods:prods,stn:stn};
   var gs=bcSheetCfg();if(gs)data.sheetform=gs; /* a coworker who imports writes to the same sheet */
   var b=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});
-  var a=document.createElement('a');a.href=URL.createObjectURL(b);
-  a.download='BlightCast_backup_'+localISO()+'.json';a.click();
+  var fn='BlightCast_backup_'+localISO()+'.json';
+  /* phone: share sheet (Save to Files / Mail / AirDrop) — same fix as
+     snapshots; a raw download link opens odd app pickers on iOS */
+  if(!(_isPhone()&&_shareFile(b,fn,'application/json')))_dlBlob(b,fn);
   state.lastBackup=Date.now();bcSaveK(BCK.state,state);
   document.getElementById('back-note').textContent='Exported '+new Date().toLocaleString()+' — keep the file somewhere safe, or send it to a coworker.';
 }
