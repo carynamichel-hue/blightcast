@@ -480,7 +480,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.17 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.18 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -1943,10 +1943,31 @@ function renderBandTable(){
 /* ════════════════════════════════════════════════════════════════════════
    Excel (CSV) exports + calendar reminder
    ════════════════════════════════════════════════════════════════════════ */
+/* file hand-off: on a PHONE the native share sheet is the honest flow
+   (preview + Save Image / Save to Files / Messages / Mail) \u2014 a hidden
+   download link on iOS lands in odd "open in \u2026?" app pickers or Notes.
+   Desktop keeps the plain download. */
+function _isPhone(){try{return matchMedia('(pointer:coarse)').matches&&typeof navigator!=='undefined'&&!!navigator.canShare;}catch(e){return false;}}
+function _dlBlob(b,fname){var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fname;a.click();}
+function _shareFile(b,fname,mime){
+  try{
+    var f=new File([b],fname,{type:mime});
+    if(navigator.canShare({files:[f]})){
+      navigator.share({files:[f]}).catch(function(e){
+        /* user closing the sheet is not an error \u2014 anything else falls
+           back to a plain download */
+        if(!e||e.name!=='AbortError')_dlBlob(b,fname);
+      });
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
 function dlText(fname,text,mime){
   /* leading BOM so Excel opens UTF-8 CSVs with accents intact */
   var b=new Blob(['\uFEFF'+text],{type:mime||'text/csv;charset=utf-8'});
-  var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fname;a.click();
+  if(_isPhone()&&_shareFile(b,fname,'text/csv'))return;
+  _dlBlob(b,fname);
 }
 function sprayCsv(){
   var mine=sprays.filter(function(s){return !s.locId||s.locId===state.activeLoc;})
@@ -2070,7 +2091,9 @@ function chartSnapshot(){
   img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(xml);
 }
 function _snapShare(b,fname){
-  var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=fname;a.click();
+  /* phone: straight to the share sheet — Save Image, text it, AirDrop it */
+  if(_isPhone()&&_shareFile(b,fname,'image/png'))return;
+  _dlBlob(b,fname);
   /* bonus where the browser allows it (needs https/localhost): straight to the clipboard */
   var copied=false;
   try{
