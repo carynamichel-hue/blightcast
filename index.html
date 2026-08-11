@@ -475,7 +475,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.15 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.16 · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -617,12 +617,15 @@ function bcRun(hours,opts){
     var h=hours[i];
     /* a gap in the record (merged station data can be disjoint) counts as
        dry hours — conservative: unknown weather never accrues risk */
+    var gapH=1;
     if(i>0&&h.t&&hours[i-1].t){
       var gapMs=new Date(h.t+':00')-new Date(hours[i-1].t+':00');
-      var gapH=Math.round(gapMs/3600000);
+      gapH=Math.round(gapMs/3600000);
       if(gapH>1){dry+=gapH-1;if(dry>=resetDry)cum=0;}
     }
-    var lw=bcLW(h,i>0?hours[i-1]:null,rhWet);
+    /* the rain-carryover wetness rule must not reach across a gap — "the
+       previous hour" only counts if it really was the hour before */
+    var lw=bcLW(h,(i>0&&gapH<=1)?hours[i-1]:null,rhWet);
     var wet=lw>=lwWet,add=0,reset=false;
     if(wet){dry=0;add=bcDHforTemp(h.temp);cum+=add;}
     else{dry++;if(dry===resetDry&&cum>0){cum=0;reset=true;}else if(dry>=resetDry)cum=0;}
@@ -931,10 +934,15 @@ function bcMergeHours(om,stn){
   var by={};
   stn.forEach(function(h){by[h.t]=h;});
   var out=om.map(function(h){return by[h.t]||h;});
-  var first=om.length?om[0].t:null;
-  var pre=stn.filter(function(h){return first==null||h.t<first;});
-  pre.sort(function(a,b){return a.t<b.t?-1:1;});
-  return pre.concat(out);
+  /* any station hour at a timestamp we don't already have still belongs in
+     the record — before the window OR inside a coverage hole left by an
+     earlier merge (higher-precedence data must never vanish) */
+  var seen={};out.forEach(function(h){seen[h.t]=1;});
+  var extra=stn.filter(function(h){return !seen[h.t];});
+  if(!extra.length)return out;
+  out=extra.concat(out);
+  out.sort(function(a,b){return a.t<b.t?-1:1;});
+  return out;
 }
 /* which weather source produced an hour (the merge stamps flags) — and a
    per-day mix like "NEWA station 20h + Open-Meteo 4h". Pure + tested. */
@@ -1218,6 +1226,10 @@ function curThr(){return state.activeLoc?thrForId(state.activeLoc):state.thresho
 function activeLoc(){return locs.find(function(l){return l.id===state.activeLoc;})||locs[0]||null;}
 function locName(id){var l=locs.find(function(x){return x.id===id;});return l?l.name:'?';}
 function localISO(d){d=d||new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
+/* "today" AT THE LOCATION (from the loaded forecast's utc offset) — the
+   browser clock's date is a different day whenever the farm is in another
+   timezone. Falls back to the browser date before any weather has loaded. */
+function todayLoc(){return nowTCache?nowTCache.slice(0,10):localISO();}
 
 /* ════════════════════════════════════════════════════════════════════════
    Tabs + modals
@@ -1416,7 +1428,7 @@ function sprayFormOpen(){
   sel.innerHTML='<option value="">— or type it in below —</option>'+prods.map(function(p){
     return '<option value="'+p.id+'">🧴 '+esc(p.name)+' ('+p.days+' days'+(p.frac?', FRAC '+esc(p.frac):'')+')</option>';
   }).join('');
-  document.getElementById('sf-date').value=localISO();
+  document.getElementById('sf-date').value=todayLoc();
   document.getElementById('sf-name').value='';
   document.getElementById('sf-days').value=7;
   document.getElementById('sf-frac').value='';
@@ -1483,7 +1495,7 @@ function renderSprays(){
   var mine=sprays.filter(function(s){return !s.locId||s.locId===state.activeLoc;})
     .sort(function(a,b){return a.date<b.date?1:-1;});
   box.innerHTML=mine.length?mine.map(function(s){
-    var eff=_sprayEff(s),active=eff.end>=localISO();
+    var eff=_sprayEff(s),active=eff.end>=todayLoc();
     var washLine='';
     if(s.wash){
       var soFar=bcRainSince(hoursCache,s.date,nowTCache);
@@ -1534,12 +1546,14 @@ function stnExpand(blob){
 /* save (merging with what's already stored — re-imports EXTEND) + 92-day cap */
 function stnSave(locId,res,fname){
   var old=stnLoad(locId),by={};
-  if(old&&old.hours)old.hours.forEach(function(a){by[a[0]]=a;});
   /* one bogus far-future row (a footer like "12/31/99" parses as 2099)
      would anchor the rolling cap there and purge the WHOLE history —
-     drop anything more than 2 days ahead of the real clock (08-10 review) */
+     drop anything more than 2 days ahead of the real clock (08-10 review).
+     The guard covers ALREADY-STORED rows too: a bogus row saved by an old
+     copy (or carried in via a backup) must not anchor the cap either. */
   var maxD=new Date();maxD.setDate(maxD.getDate()+2);
   var maxISO=maxD.getFullYear()+'-'+('0'+(maxD.getMonth()+1)).slice(-2)+'-'+('0'+maxD.getDate()).slice(-2);
+  if(old&&old.hours)old.hours.forEach(function(a){if(a[0].slice(0,10)<=maxISO)by[a[0]]=a;});
   res.hours.forEach(function(h){if(h.date<=maxISO)by[h.t]=[h.t,h.temp,h.rh,h.rain,h.wind,h.lwObs];});
   var keys=Object.keys(by).sort();
   if(keys.length){
@@ -1670,8 +1684,8 @@ function renderStatus(){
   else lines.push('<span>☀ Leaves estimated dry — '+r.dry+' dry hour'+(r.dry===1?'':'s')+' so far'+(r.dry>=6?' (accumulation is reset)':' (resets at 6)')+'.</span>');
   /* re-spray planner: protection windows + the forecast, combined */
   var thr=curThr();
-  var prot=bcProtectedUntil(sprays,state.activeLoc,localISO(),hoursCache);
-  _sprayByCache=bcSprayBy(runCache,hoursCache,nowIdxCache,thr,prot?prot.end:null,localISO());
+  var prot=bcProtectedUntil(sprays,state.activeLoc,todayLoc(),hoursCache);
+  _sprayByCache=bcSprayBy(runCache,hoursCache,nowIdxCache,thr,prot?prot.end:null,todayLoc());
   var icsBtn=' <button class="sbtn" style="border-color:var(--blue);color:var(--blue);" onclick="icsSprayBy()" title="Download a calendar reminder (12-hour and 1-hour alarms built in)">📅 Remind me</button>';
   var fmtD=function(iso){return new Date(iso+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});};
   if(prot){
@@ -1734,7 +1748,13 @@ function renderChart(){
     lyMap={};
     for(var q=0;q<lyHours.length;q++){
       var tk=bcYearShift(lyHours[q].t);
-      if(tk){lyMap[tk]=lyRun[q].cum;if(lyRun[q].cum>maxC)maxC=lyRun[q].cum;}
+      if(tk)lyMap[tk]=lyRun[q].cum;
+    }
+    /* scale the y-axis only to what's ON the chart — an old off-screen peak
+       must not squash the visible curves */
+    for(var q2=0;q2<hrs.length;q2++){
+      var lv=lyMap[hrs[q2].t];
+      if(lv!=null&&lv>maxC)maxC=lv;
     }
   }
   var yMax=Math.max(thr*1.3,maxC*1.15,200);
@@ -2047,7 +2067,7 @@ function _snapShare(b,fname){
 }
 function icsSprayBy(){
   if(!_sprayByCache)return;
-  var date=_sprayByCache.dateISO,today=localISO();
+  var date=_sprayByCache.dateISO,today=todayLoc();
   if(date<today)date=today;                    /* never remind in the past */
   var d=date.replace(/-/g,'');
   var stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
@@ -2256,12 +2276,14 @@ function _apiSig(api){
 }
 function _apiMergeCache(locId,sig,newHours,lwet){
   var by={};
-  try{
-    var c=JSON.parse(localStorage.getItem(apiKey(locId))||'null');
-    if(c&&c.sig===sig&&c.hours)c.hours.forEach(function(a){by[a[0]]=a;});
-  }catch(e){}
   var maxD=new Date();maxD.setDate(maxD.getDate()+2);
   var maxISO=maxD.getFullYear()+'-'+('0'+(maxD.getMonth()+1)).slice(-2)+'-'+('0'+maxD.getDate()).slice(-2);
+  try{
+    var c=JSON.parse(localStorage.getItem(apiKey(locId))||'null');
+    /* same far-future guard as stnSave, applied to the STORED rows too —
+       a bogus row must never anchor the rolling cap */
+    if(c&&c.sig===sig&&c.hours)c.hours.forEach(function(a){if(a[0].slice(0,10)<=maxISO)by[a[0]]=a;});
+  }catch(e){}
   newHours.forEach(function(h){if(h.date<=maxISO)by[h.t]=[h.t,h.temp,h.rh,h.rain,h.wind,h.lwObs];});
   var keys=Object.keys(by).sort();
   if(keys.length){
