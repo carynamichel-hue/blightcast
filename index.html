@@ -488,7 +488,7 @@ table.bands td{padding:7px 8px;border-bottom:1px solid #eef3ed;}
   </div>
 </div>
 
-<div class="ftr">BlightCast v0.21 · <a href="guide.html">📖 how-to guide</a> · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
+<div class="ftr">BlightCast v0.22 · <a href="guide.html">📖 how-to guide</a> · risk model: <a href="https://uspest.org/wea/Boxwood_blight_risk_model_summaryV3.pdf" target="_blank" rel="noopener">USPest.org / Oregon State Univ. v3.0</a> ·
 weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
 built with the toolkit behind Overdevest Nurseries' farm-management apps</div>
 
@@ -809,8 +809,60 @@ function bcLastFrac(sprays,locId){
   });
   return last?String(last.frac).trim().toUpperCase():null;
 }
-/* ICS builder: floating local times + two built-in reminders (12h, 1h).
-   Works in Outlook, Gmail and Apple Calendar alike. */
+/* ICS builder: two built-in reminders (12h, 1h). Works in Outlook, Gmail
+   and Apple Calendar alike.
+
+   Event times are REAL UTC INSTANTS (2026-08-14). They used to be written
+   floating — no trailing Z, no TZID — which per RFC 5545 3.3.5 means every
+   calendar shows them at that hour in ITS OWN zone. A 7 AM New Jersey
+   re-spray reminder opened by someone in California fired at 7 AM Pacific.
+   Invisible while everyone shares one timezone; wrong the moment the app
+   is shared. Same fix as SprayCast v0.17, same helpers. */
+function bcTzOffset(tz,utcMs){
+  /* minutes that `tz` is ahead of UTC at instant utcMs. Intl is the only
+     way to ask this without shipping a timezone database. */
+  try{
+    var p={},f=new Intl.DateTimeFormat('en-US',{timeZone:tz,hour12:false,
+      year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    f.formatToParts(new Date(utcMs)).forEach(function(x){p[x.type]=x.value;});
+    if(!p.year)return null;
+    /* hour12:false still yields "24" for midnight in some engines */
+    return (Date.UTC(+p.year,+p.month-1,+p.day,(+p.hour)%24,+p.minute,+p.second)-utcMs)/60000;
+  }catch(e){return null;}
+}
+function bcZonedToUtc(dateStr,hour,tz,offSec){
+  /* wall time dateStr@hour AT the location → UTC ms, or null if the zone
+     is unknown. Two passes: the first offset comes from an approximate
+     instant, the second from the corrected one — that is what makes the
+     hours either side of a DST change come out right. The offset is read
+     for the EVENT'S OWN date, not for when the forecast was fetched. */
+  var wall=Date.UTC(+dateStr.slice(0,4),+dateStr.slice(5,7)-1,+dateStr.slice(8,10),hour,0,0);
+  if(isNaN(wall))return null;
+  if(tz){
+    var o=bcTzOffset(tz,wall);
+    if(o!=null){
+      var o2=bcTzOffset(tz,wall-o*60000);
+      return wall-(o2==null?o:o2)*60000;
+    }
+  }
+  if(offSec!=null&&isFinite(offSec))return wall-offSec*1000;
+  return null;
+}
+function bcUtcStamp(ms){
+  var d=new Date(ms),p=function(n){return ('0'+n).slice(-2);};
+  return d.getUTCFullYear()+p(d.getUTCMonth()+1)+p(d.getUTCDate())+'T'+
+         p(d.getUTCHours())+p(d.getUTCMinutes())+'00Z';
+}
+/* dateStr@hour at the location → an ICS DATE-TIME. Falls back to the old
+   floating stamp when the zone is unknown, which is still correct for a
+   reader sitting in the location's own timezone.
+   zone = {tz:'America/New_York', off:-14400}; either field alone is enough. */
+function bcIcsWhen(dateStr,hour,zone){
+  zone=zone||{};
+  var ms=bcZonedToUtc(dateStr,hour,zone.tz,zone.off);
+  if(ms!=null)return bcUtcStamp(ms);
+  return dateStr.replace(/-/g,'')+'T'+('0'+hour).slice(-2)+'0000';
+}
 function bcIcsEscape(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n');}
 function bcIcs(evts,stamp){
   var L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//BlightCast//EN','CALSCALE:GREGORIAN'];
@@ -1271,6 +1323,18 @@ function localISO(d){d=d||new Date();return d.getFullYear()+'-'+('0'+(d.getMonth
    browser clock's date is a different day whenever the farm is in another
    timezone. Falls back to the browser date before any weather has loaded. */
 function todayLoc(){return nowTCache?nowTCache.slice(0,10):localISO();}
+/* The zone the active location's hours are written in — the LOCATION's,
+   never the reader's. Locations added by search carry an IANA tz from the
+   geocoder; older saved ones and any that arrive without it are backfilled
+   from the forecast reply the first time one lands (see wxFetch). Used by
+   the calendar export — see bcIcsWhen. */
+function locZone(){
+  var l=activeLoc();
+  var tz=(l&&l.tz&&l.tz!=='auto')?l.tz:null;
+  if(!tz&&wxData&&wxData.timezone&&wxData.timezone!=='auto')tz=wxData.timezone;
+  var off=(wxData&&wxData.utc_offset_seconds!=null)?wxData.utc_offset_seconds:null;
+  return {tz:tz,off:off};
+}
 
 /* ════════════════════════════════════════════════════════════════════════
    Tabs + modals
@@ -1326,7 +1390,9 @@ function _locRender(res){
 }
 function locAdd(i){
   var r=document.getElementById('loc-results')._res[i];if(!r)return;
-  var l={id:'l_'+Date.now().toString(36),name:[r.name,r.admin1].filter(Boolean).join(', '),lat:r.latitude,lon:r.longitude};
+  /* tz comes straight from the geocoder; the calendar export needs it to
+     write a real instant instead of a floating time (see bcIcsWhen) */
+  var l={id:'l_'+Date.now().toString(36),name:[r.name,r.admin1].filter(Boolean).join(', '),lat:r.latitude,lon:r.longitude,tz:r.timezone||'auto'};
   locs.push(l);state.activeLoc=l.id;
   bcSaveK(BCK.locs,locs);bcSaveK(BCK.state,state);
   locRenderList();wxData=null;renderAll();toast('Location saved — fetching a month of weather');
@@ -1628,6 +1694,15 @@ function rebuild(){
   hoursCache=bcMergeHours(bcMergeHours(bcMergeHours(bcHours(wxData),newa),api),stn);
   runCache=bcRun(hoursCache,{rhWet:state.rhWet,lwWet:state.lwWet});
   nowTCache=new Date(Date.now()+((wxData.utc_offset_seconds||0)*1000)).toISOString().slice(0,13)+':00';
+  /* Learn this location's IANA timezone from the forecast reply if we don't
+     already have it — locations saved before 2026-08-14 carry none, and the
+     calendar export needs one to write a real instant (see bcIcsWhen). */
+  try{
+    var _lz=activeLoc();
+    if(_lz&&(!_lz.tz||_lz.tz==='auto')&&wxData.timezone&&wxData.timezone!=='auto'){
+      _lz.tz=wxData.timezone;bcSaveK(BCK.locs,locs);
+    }
+  }catch(e){}
   nowIdxCache=bcNowIdx(hoursCache,nowTCache);
   daysCache=bcDaysBuild(hoursCache,runCache,wxData.daily);
   /* rebuild the whole note from the stored base — appending to the live
@@ -2150,10 +2225,11 @@ function icsSprayBy(){
   if(!_sprayByCache)return;
   var date=_sprayByCache.dateISO,today=todayLoc();
   if(date<today)date=today;                    /* never remind in the past */
-  var d=date.replace(/-/g,'');
   var stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
+  /* 7-8 AM AT THE LOCATION, written as a real instant — see bcIcsWhen */
+  var z=locZone();
   var evt={uid:'bc_'+date+'_'+(state.activeLoc||'x')+'@blightcast',
-    start:d+'T070000',end:d+'T080000',
+    start:bcIcsWhen(date,7,z),end:bcIcsWhen(date,8,z),
     summary:'Re-spray boxwood — blight risk (BlightCast)',
     desc:'Accumulated boxwood blight risk is forecast to reach your alert level ('+curThr()+' DH)'
       +(activeLoc()?' at '+activeLoc().name:'')+'. Planned with BlightCast.'};
