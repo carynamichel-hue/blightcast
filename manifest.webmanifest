@@ -3,6 +3,7 @@
   "short_name": "BlightCast",
   "description": "Watch accumulated boxwood blight infection risk (USPest/OSU model v3.0) on your own weather — free, no accounts, your data stays on your device.",
   "start_url": ".",
+  "scope": ".",
   "display": "standalone",
   "background_color": "#f3f7f2",
   "theme_color": "#2e6b2f",
