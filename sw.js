@@ -13,7 +13,7 @@
    server (and swept from the cache by the new worker) — clicking a header
    tab then silently did nothing. Hashed assets stay cache-first (immutable).
    CACHE is stamped per-deploy by the deploy script so old caches sweep. */
-var CACHE = 'blightcast-nuxt-202608231818';
+var CACHE = 'blightcast-nuxt-202608231824';
 var SHELL = ['./', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', function (e) {
