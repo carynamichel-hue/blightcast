@@ -9,7 +9,7 @@
    Update flow: stale-while-revalidate — a new deploy is picked up in the
    background and shown on the NEXT open. Bump CACHE with each published
    release so old caches get swept. */
-var CACHE = 'blightcast-nuxt-202608231756';
+var CACHE = 'blightcast-nuxt-202608231759';
 var SHELL = ['./', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', function (e) {
